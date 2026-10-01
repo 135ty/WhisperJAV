@@ -71,6 +71,12 @@ def _has_error_keyword(text: str) -> bool:
     return any(k in lowered for k in ("error", "failed", "exception", "traceback"))
 
 
+def _format_bar(current: int, total: int, width: int = 24) -> str:
+    """ASCII bar in the house style: '=' filled + '-' remainder."""
+    filled = int(width * current / total) if total else 0
+    return "=" * filled + "-" * (width - filled)
+
+
 class _QuietStream:
     """Replacement stdout/stderr used inside ``gate.quiet()``.
 
@@ -215,9 +221,7 @@ class ConsoleGate:
     def _scope_text(self) -> str:
         pct = self._scope_pct()
         eta = self._scope_eta()
-        width = 24
-        filled = int(width * self._scope_current / self._scope_total) if self._scope_total else 0
-        bar = "=" * filled + "-" * (width - filled)
+        bar = _format_bar(self._scope_current, self._scope_total)
         label = self._scope_label or "Processing"
         eta_text = ""
         if eta is not None:
@@ -472,11 +476,16 @@ class GateProgressBar:
         self._render()
 
     def _render(self):
-        pct = (self.n / self.total * 100.0) if self.total else 0.0
+        # Same bar style as the file-level scope bar, so the combined line
+        # reads e.g.
+        #   Transcribing: [======----] 12/45 [26.7%] | ETA: 3.2m | ASR Text Gen: [============] 8/8
         get_gate().update_bar(
-            f"{self.desc} [{self.n}/{self.total}]",
-            scene=self.n, scenes=self.total, pct=round(pct, 1),
+            f"{self.desc}: [{_format_bar(self.n, self.total)}] {self.n}/{self.total}",
+            scene=self.n, scenes=self.total, pct=self._pct(),
         )
+
+    def _pct(self):
+        return round(self.n / self.total * 100.0, 1) if self.total else 0.0
 
 
 _gate: ConsoleGate = ConsoleGate()
