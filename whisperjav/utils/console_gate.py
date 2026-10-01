@@ -287,13 +287,12 @@ class ConsoleGate:
         # per-scene "ASR Text Gen" bar) are prefixed with the scene-level
         # picture, and pipe-mode records carry the file-level numbers.
         if self.scope_active() and not self._scope_rendering:
-            fields = dict(fields)
-            fields.setdefault("scene", self._scope_current)
-            fields.setdefault("scenes", self._scope_total)
-            fields.setdefault("pct", round(self._scope_pct(), 1))
-            eta = self._scope_eta()
-            if eta is not None:
-                fields.setdefault("eta", eta)
+            if not self._is_terminal():
+                # Pipe consumers (GUI) see ONLY the file-level scope records.
+                # Fast inner frames are folded into the scope and emit nothing
+                # of their own, so the GUI progress advances once per scene
+                # instead of racing with the in-block bar.
+                return
             text = f"{self._scope_text()} | {text}"
 
         if self._verbose:
