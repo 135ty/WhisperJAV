@@ -121,8 +121,28 @@ class TestResilienceWrapperUnderOffline:
             raise ConnectionError("connection timed out")
 
         wrapped = ml._make_resilient_wrapper(original, "hf_hub_download")
+        # Step 0 (cache-first) hits the cache before any network attempt,
+        # so an already-downloaded file never touches the hub.
         assert wrapped("org/model", "file.json") == "cached"
-        assert calls == [{}, {"local_files_only": True}]
+        assert calls == [{"local_files_only": True}]
+
+    def test_wrapper_falls_through_to_network_on_cache_miss(self, monkeypatch):
+        import huggingface_hub.constants as c
+        from whisperjav.utils import model_loader as ml
+        monkeypatch.setattr(c, "HF_HUB_OFFLINE", False)
+        calls = []
+
+        def original(*a, **kw):
+            calls.append(kw)
+            if kw.get("local_files_only"):
+                raise OSError("not in cache")
+            return "downloaded"
+
+        wrapped = ml._make_resilient_wrapper(original, "hf_hub_download")
+        # Step 0 misses (OSError), Step 1 downloads normally.
+        assert wrapped("org/model", "file.json") == "downloaded"
+        assert calls[0].get("local_files_only") is True
+        assert calls[1].get("local_files_only") is None
 
 
 @pytest.mark.slow
