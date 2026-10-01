@@ -1402,8 +1402,8 @@ button:focus-visible,
         100px          /* 4: sensitivity */
         12px           /* 5: separator */
         90px           /* 6: scene detector */
-        90px           /* 7: speech enhancer */
-        115px          /* 8: speech segmenter */
+        100px          /* 7: speech enhancer (select + optional VAD-only checkbox) */
+        105px          /* 8: speech segmenter */
         12px           /* 9: separator */
         90px           /* 10: model */
         170px;         /* 11: actions */
@@ -1480,6 +1480,37 @@ button:focus-visible,
 .col-model {
     display: flex;
     justify-content: center;
+}
+
+/* Enhancer column stacks: dropdown on top, "Enhance for VAD only" checkbox below */
+.col-enhancer {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+/* "Enhance for VAD only" row (revealed when an enhancer is selected) */
+.enhance-for-vad-row {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    line-height: 1;
+}
+
+.enhance-for-vad-row .checkbox-label {
+    font-size: 9px;
+    gap: 3px;
+    white-space: nowrap;
+    cursor: pointer;
+    margin: 0;
+}
+
+.enhance-for-vad-row .checkbox-label input[type="checkbox"] {
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
 }
 
 /* Actions column */
