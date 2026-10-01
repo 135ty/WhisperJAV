@@ -5730,6 +5730,23 @@ const EnsembleManager = {
                 // Pipeline type changed — swap model options first, then set model
                 this.swapModelOptions(passKey, newType);
                 this.applyPipelinePresets(passKey, newType);
+                // v1.9.3 fix: applyPipelinePresets just reset scene/sensitivity/
+                // segmenter (DOM *and* passState) to the new pipeline's DEFAULTS,
+                // clobbering the preset values applied above. Without this re-apply
+                // a type-switching preset only took effect on the SECOND load (the
+                // first load matched oldType===newType check no longer held).
+                if (preset.sensitivity) passState.sensitivity = preset.sensitivity;
+                if (preset.sceneDetector) passState.sceneDetector = preset.sceneDetector;
+                if (preset.speechSegmenter) passState.speechSegmenter = preset.speechSegmenter;
+                if (preset.vadVersion) passState.vadVersion = preset.vadVersion;
+                setSilent(`${prefix}-sensitivity`, preset.sensitivity);
+                setSilent(`${prefix}-scene`, preset.sceneDetector);
+                this.populateSegmenterOptions(passKey);
+                if (preset.pipeline === 'balanced') {
+                    setSilent(`${prefix}-segmenter`, preset.vadVersion || this.defaultVadVersion);
+                } else {
+                    setSilent(`${prefix}-segmenter`, preset.speechSegmenter);
+                }
                 setSilent(`${prefix}-model`, preset.model);
 
                 // Close and reopen modal so correct pipeline-specific controls appear
