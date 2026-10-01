@@ -2414,6 +2414,16 @@ def main():
     log_level = "DEBUG" if args.debug else args.log_level
     logger = setup_logger("whisperjav", log_level, args.log_file)
 
+    # ConsoleGate: the single owner of console progress rendering.
+    # verbose/debug modes bypass the gate entirely (legacy behavior);
+    # --no-progress disables the bar but keeps write_line passthrough.
+    from whisperjav.utils.console_gate import configure_console_gate, silence_external_progress
+    _gate_verbose = args.debug or getattr(args, 'verbosity', None) in ('verbose', 'debug', 'detailed')
+    configure_console_gate(enabled=not args.no_progress, verbose=_gate_verbose)
+    if not _gate_verbose:
+        # Kill HF download bars / transformers loading noise at the source.
+        silence_external_progress()
+
     if args.debug:
         logger.info("=" * 70)
         logger.info("DEBUG MODE ENABLED - Comprehensive diagnostic logging active")

@@ -572,6 +572,15 @@ def run_pass_worker(payload: WorkerPayload, result_file: str) -> None:
     # (subprocess starts fresh with default INFO level due to 'spawn' context)
     setup_logger("whisperjav", payload.log_level)
 
+    # ConsoleGate for the worker subprocess: its stdout is a pipe (GUI or
+    # ensemble parent), so the gate auto-selects pipe mode and emits
+    # structured PROGRESS records instead of \r bars.
+    from whisperjav.utils.console_gate import configure_console_gate, silence_external_progress
+    _gate_verbose = payload.log_level.upper() in ("DEBUG",)
+    configure_console_gate(verbose=_gate_verbose)
+    if not _gate_verbose:
+        silence_external_progress()
+
     # Create parameter tracer if trace file path is provided
     # Use append=True since the main process already created the file
     # JSONL format allows concurrent writers with line-buffered output

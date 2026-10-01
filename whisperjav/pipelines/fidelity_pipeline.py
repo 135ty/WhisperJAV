@@ -16,6 +16,7 @@ from whisperjav.modules.srt_postprocessing import SRTPostProcessor as StandardPo
 from whisperjav.modules.scene_detection_backends import SceneDetectorFactory
 
 from whisperjav.modules.srt_stitching import SRTStitcher
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 from whisperjav.utils.model_refresh import DEFAULT_MODEL_REFRESH_AUDIO_MINUTES, ModelRefreshPolicy
 
@@ -310,7 +311,10 @@ class FidelityPipeline(BasePipeline):
                 def enhancement_progress(scene_num, total, name):
                     if scene_num == 1 or scene_num % 5 == 0 or scene_num == total:
                         pct = (scene_num / total) * 100
-                        print(f"\rEnhancing: [{scene_num}/{total}] {pct:.0f}%", end='', flush=True)
+                        get_gate().update_bar(
+                            f"Enhancing: [{scene_num}/{total}] {pct:.0f}%",
+                            scene=scene_num, scenes=total, pct=round(pct, 1),
+                        )
 
                 # B. Process Enhancement (includes 48kHz→16kHz resampling)
                 enhanced_paths = enhance_scenes(
@@ -442,8 +446,10 @@ class FidelityPipeline(BasePipeline):
                         scene_filename = scene_filename[:22] + "..."
                     
                     # Direct console output (bypasses adapter filtering)
-                    progress_line = f"\rTranscribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}"
-                    print(progress_line, end='', flush=True)
+                    get_gate().update_bar(
+                        f"Transcribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}",
+                        scene=scene_num, scenes=total_scenes, pct=round(progress_pct, 1),
+                    )
                     
                     last_update_time = time.time()
                 
@@ -499,7 +505,7 @@ class FidelityPipeline(BasePipeline):
             self.progress.finish_subtask()
             
             # Print completion message for scene transcription (always visible)
-            print(f"\n[DONE] Completed transcription of {total_scenes} scenes")
+            get_gate().end_bar(f"[DONE] Completed transcription of {total_scenes} scenes")
             
             # Step 5: Stitch scenes
             if self.progress_reporter:

@@ -28,6 +28,7 @@ from whisperjav.modules.audio_extraction import AudioExtractor
 from whisperjav.modules.transformers_asr import TransformersASR
 from whisperjav.modules.srt_postprocessing import SRTPostProcessor, normalize_language_code
 from whisperjav.modules.srt_stitching import SRTStitcher
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 from whisperjav.utils.progress_display import DummyProgress
 
@@ -759,7 +760,10 @@ class TransformersPipeline(BasePipeline):
                             eta_text = f" | ETA: {remaining:.0f}s"
 
                     scene_name = scene_path.name[:25] + "..." if len(scene_path.name) > 25 else scene_path.name
-                    print(f"\rTranscribing: [{bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_name}{eta_text}", end='', flush=True)
+                    get_gate().update_bar(
+                        f"Transcribing: [{bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_name}{eta_text}",
+                        scene=scene_num, scenes=total_scenes, pct=round(progress_pct, 1),
+                    )
 
                     try:
                         # Transcribe scene
@@ -794,7 +798,7 @@ class TransformersPipeline(BasePipeline):
                         master_metadata["scenes_detected"][idx]["transcribed"] = False
                         master_metadata["scenes_detected"][idx]["error"] = str(e)
 
-                print(f"\n[DONE] Completed transcription of {total_scenes} scenes")
+                get_gate().end_bar(f"[DONE] Completed transcription of {total_scenes} scenes")
 
                 # Step 4: Stitch scene SRTs
                 self.progress.set_current_step("Stitching scene transcriptions", 4, 5)

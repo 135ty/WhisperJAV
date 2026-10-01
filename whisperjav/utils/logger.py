@@ -65,6 +65,31 @@ class ColorFormatter(logging.Formatter):
         return color_text(formatted, color)
 
 
+class GateAwareStreamHandler(logging.StreamHandler):
+    """Console handler that routes through the ConsoleGate.
+
+    While a terminal progress bar is live, INFO records are suppressed on
+    the console (the optional file handler still records them) so they
+    cannot tear the bar. WARNING and above break the bar via
+    ``gate.write_line`` — problems are always shown.
+    """
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            from whisperjav.utils.console_gate import get_gate
+
+            gate = get_gate()
+            if gate.defer_info():
+                if record.levelno >= logging.WARNING:
+                    gate.write_line(self.format(record))
+                # INFO/debug: dropped on console only; file handler keeps it.
+                return
+        except Exception:
+            # Gate unavailable — fall through to normal emission.
+            pass
+        super().emit(record)
+
+
 def setup_logger(name: str = "whisperjav",
                 log_level: str = "INFO",
                 log_file: Optional[str] = None) -> logging.Logger:
@@ -81,8 +106,8 @@ def setup_logger(name: str = "whisperjav",
     logger.handlers = []
     logger.propagate = False
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Console handler (gate-aware: defers INFO under a live progress bar)
+    console_handler = GateAwareStreamHandler(sys.stdout)
     console_format = ColorFormatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',

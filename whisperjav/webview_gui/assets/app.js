@@ -837,6 +837,13 @@ const ConsoleManager = {
             // Skip the last empty line from split
             if (index === lines.length - 1 && line === '') return;
 
+            // Structured progress record from the CLI subprocess console gate —
+            // drive the GUI progress bar instead of polluting the console panel.
+            if (line.startsWith('PROGRESS\t')) {
+                this._handleProgressRecord(line.substring('PROGRESS\t'.length));
+                return;
+            }
+
             const lineEl = document.createElement('div');
             lineEl.className = 'console-line';
             lineEl.textContent = line || ' '; // Use space for empty lines to preserve height
@@ -844,7 +851,21 @@ const ConsoleManager = {
         });
 
         this._autoScroll(output);
-    }
+    },
+
+    _handleProgressRecord(payload) {
+        try {
+            const p = JSON.parse(payload);
+            if (typeof p.pct === 'number' && isFinite(p.pct)) {
+                ProgressManager.setProgress(Math.max(0, Math.min(100, p.pct)));
+            }
+            if (p.detail) {
+                ProgressManager.setStatus(p.detail);
+            }
+        } catch (e) {
+            // Not a valid JSON progress record — ignore silently
+        }
+    },
 };
 
 // ============================================================

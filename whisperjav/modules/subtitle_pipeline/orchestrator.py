@@ -50,6 +50,7 @@ from whisperjav.modules.subtitle_pipeline.types import (
     TemporalFrame,
     TimestampMode,
 )
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 
 try:
@@ -976,8 +977,16 @@ class DecoupledSubtitlePipeline:
                 segment_count = len(result.segments) if result and result.segments else 0
                 total_segments += segment_count
 
-                # Per-scene progress
-                logger.info(
+                # Per-scene progress via the console gate: a terminal \r bar
+                # (CLI) or a structured PROGRESS record (GUI/pipe). The old
+                # per-scene logger.info line is demoted to debug — it was the
+                # main thing tearing the CLI bar and flooding the GUI panel.
+                get_gate().update_bar(
+                    f"Reconstructing: [{scene_idx + 1}/{n_scenes}] {total_segments} segments",
+                    scene=scene_idx + 1, scenes=n_scenes,
+                    pct=round((scene_idx + 1) / n_scenes * 100.0, 1) if n_scenes else 0.0,
+                )
+                logger.debug(
                     "[DecoupledPipeline] Scene %d/%d: %d words → %d segments (sentinel: %s)",
                     scene_idx + 1, n_scenes, word_count, segment_count, sentinel_status,
                 )
@@ -1058,6 +1067,7 @@ class DecoupledSubtitlePipeline:
                 )
                 results.append((None, asdict(error_diag)))
 
+        get_gate().end_bar()
         logger.info(
             "[DecoupledPipeline] Step 9: Complete — %d scenes, %d total segments, %d collapses",
             n_scenes, total_segments, total_collapses,

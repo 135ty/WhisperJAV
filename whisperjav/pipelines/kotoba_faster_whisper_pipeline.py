@@ -22,6 +22,7 @@ from whisperjav.modules.kotoba_faster_whisper_asr import KotobaFasterWhisperASR
 from whisperjav.modules.srt_postprocessing import SRTPostProcessor
 from whisperjav.modules.scene_detection_backends import SceneDetectorFactory
 from whisperjav.modules.srt_stitching import SRTStitcher
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 from whisperjav.utils.progress_display import DummyProgress
 
@@ -345,8 +346,10 @@ class KotobaFasterWhisperPipeline(BasePipeline):
                         eta_text = f" | ETA: {eta_seconds:.0f}s"
 
                 scene_filename = scene_path.name[:25] + "..." if len(scene_path.name) > 25 else scene_path.name
-                progress_line = f"\rTranscribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}"
-                print(progress_line, end='', flush=True)
+                get_gate().update_bar(
+                    f"Transcribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}",
+                    scene=scene_num, scenes=total_scenes, pct=round(progress_pct, 1),
+                )
 
                 try:
                     self.asr.transcribe_to_srt(scene_path, scene_srt_path)
@@ -368,7 +371,7 @@ class KotobaFasterWhisperPipeline(BasePipeline):
                     self.progress.update_subtask(1)
 
             self.progress.finish_subtask()
-            print(f"\n[DONE] Completed transcription of {total_scenes} scenes")
+            get_gate().end_bar(f"[DONE] Completed transcription of {total_scenes} scenes")
 
             master_metadata["summary"]["scenes_processed_successfully"] = len(scene_srt_info)
             self.metadata_manager.update_processing_stage(

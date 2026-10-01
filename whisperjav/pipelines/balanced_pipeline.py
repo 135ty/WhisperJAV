@@ -16,6 +16,7 @@ from whisperjav.modules.srt_postprocessing import SRTPostProcessor as StandardPo
 from whisperjav.modules.scene_detection_backends import SceneDetectorFactory
 
 from whisperjav.modules.srt_stitching import SRTStitcher
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 from whisperjav.utils.asr_telemetry import AsrTelemetry, resolve_telemetry_path
 from whisperjav.utils.model_refresh import DEFAULT_MODEL_REFRESH_AUDIO_MINUTES
@@ -430,7 +431,10 @@ class BalancedPipeline(BasePipeline):
                 def enhancement_progress(scene_num, total, name):
                     if scene_num == 1 or scene_num % 5 == 0 or scene_num == total:
                         pct = (scene_num / total) * 100
-                        print(f"\rProcessing: [{scene_num}/{total}] {pct:.0f}%", end='', flush=True)
+                        get_gate().update_bar(
+                            f"Processing: [{scene_num}/{total}] {pct:.0f}%",
+                            scene=scene_num, scenes=total, pct=round(pct, 1),
+                        )
 
                 # B. Process scenes (enhancement + 48kHz→16kHz resampling)
                 scene_paths = enhance_scenes(
@@ -588,8 +592,10 @@ class BalancedPipeline(BasePipeline):
                         scene_filename = scene_filename[:22] + "..."
 
                     # Direct console output (bypasses adapter filtering)
-                    progress_line = f"\rTranscribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}"
-                    print(progress_line, end='', flush=True)
+                    get_gate().update_bar(
+                        f"Transcribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}",
+                        scene=scene_num, scenes=total_scenes, pct=round(progress_pct, 1),
+                    )
 
                     last_update_time = time.time()
 
@@ -613,15 +619,13 @@ class BalancedPipeline(BasePipeline):
                             _yield = scene_srt_path.read_text(encoding='utf-8').count(' --> ')
                     except Exception:  # noqa: BLE001 - reporting must never break a run
                         _yield = -1
-                    # One line per scene, newline-terminated. No carriage return and
-                    # no padding: the progress bar above draws in place with \r and
-                    # redraws on its next update, so a plain line cannot tear it.
-                    print(
+                    # One line per scene, newline-terminated. Routed through the
+                    # console gate so it clears/redraws the progress bar cleanly.
+                    get_gate().write_line(
                         f"  Scene {scene_num}/{total_scenes} "
                         f"({scene_paths[idx][3]:.0f}s, {_detection_label}): "
                         f"{_yield} subtitle(s) in {_scene_wall:.0f}s"
-                        f"{'  <-- NO OUTPUT' if _yield == 0 else ''}",
-                        flush=True,
+                        f"{'  <-- NO OUTPUT' if _yield == 0 else ''}"
                     )
 
                     # Process results - simplified to reduce message spam
@@ -659,11 +663,10 @@ class BalancedPipeline(BasePipeline):
                     master_metadata["scenes_detected"][idx]["transcribed"] = False
                     master_metadata["scenes_detected"][idx]["error"] = str(e)
                     _scene_produced = False
-                    print(
+                    get_gate().write_line(
                         (f"  Scene {scene_num}/{total_scenes} "
                          f"({scene_paths[idx][3]:.0f}s, {_detection_label}): "
-                         f"FAILED after {_scene_wall:.0f}s -- {e}")[:160],
-                        flush=True,
+                         f"FAILED after {_scene_wall:.0f}s -- {e}")[:160]
                     )
                     self.progress.update_subtask(1)
 
@@ -705,7 +708,7 @@ class BalancedPipeline(BasePipeline):
                 master_metadata["vad_params"] = self.vad_params
 
             # Print completion message for scene transcription (always visible)
-            print(f"\n[DONE] Completed transcription of {total_scenes} scenes")
+            get_gate().end_bar(f"[DONE] Completed transcription of {total_scenes} scenes")
 
             # Step 5: Stitch scenes
             if self.progress_reporter:
