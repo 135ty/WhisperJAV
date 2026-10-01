@@ -509,6 +509,11 @@ class DecoupledSubtitlePipeline:
                 audio_paths = frame_audio_paths[scene_idx]
                 raw_texts = []
 
+                # File-level progress scope: the per-scene bars below (e.g.
+                # "ASR Text Gen 3/8") render COMBINED with this, so the line
+                # always shows "Transcribing: [====] 12/45 …| ASR Text Gen 3/8".
+                get_gate().update_scope(scene_idx + 1, n_scenes, "Transcribing")
+
                 logger.info(
                     "[DecoupledPipeline] Generating scene %d/%d (%.1fs audio)...",
                     scene_idx + 1, n_scenes, scene_durations[scene_idx],
@@ -586,6 +591,7 @@ class DecoupledSubtitlePipeline:
             if needs_generation:
                 self.generator.unload()
                 self._safe_cuda_cleanup()
+            get_gate().clear_scope()
 
         # Phase 2: Cleaning
         logger.info("[DecoupledPipeline] Cleaning %d scenes", n_scenes)
@@ -977,15 +983,11 @@ class DecoupledSubtitlePipeline:
                 segment_count = len(result.segments) if result and result.segments else 0
                 total_segments += segment_count
 
-                # Per-scene progress via the console gate: a terminal \r bar
-                # (CLI) or a structured PROGRESS record (GUI/pipe). The old
-                # per-scene logger.info line is demoted to debug — it was the
-                # main thing tearing the CLI bar and flooding the GUI panel.
-                get_gate().update_bar(
-                    f"Reconstructing: [{scene_idx + 1}/{n_scenes}] {total_segments} segments",
-                    scene=scene_idx + 1, scenes=n_scenes,
-                    pct=round((scene_idx + 1) / n_scenes * 100.0, 1) if n_scenes else 0.0,
-                )
+                # Per-scene progress via the file-level scope: one bar for the
+                # whole reconstruct phase (the old per-scene logger.info line
+                # is demoted to debug — it tore the CLI bar and flooded the
+                # GUI panel).
+                get_gate().update_scope(scene_idx + 1, n_scenes, "Finalizing")
                 logger.debug(
                     "[DecoupledPipeline] Scene %d/%d: %d words → %d segments (sentinel: %s)",
                     scene_idx + 1, n_scenes, word_count, segment_count, sentinel_status,
@@ -1067,6 +1069,7 @@ class DecoupledSubtitlePipeline:
                 )
                 results.append((None, asdict(error_diag)))
 
+        get_gate().clear_scope()
         get_gate().end_bar()
         logger.info(
             "[DecoupledPipeline] Step 9: Complete — %d scenes, %d total segments, %d collapses",
