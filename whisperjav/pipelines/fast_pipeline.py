@@ -15,6 +15,7 @@ from whisperjav.modules.srt_postprocessing import SRTPostProcessor as StandardPo
 from whisperjav.modules.scene_detection_backends import SceneDetectorFactory
 
 from whisperjav.modules.srt_stitching import SRTStitcher
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 
 from whisperjav.utils.progress_display import DummyProgress
@@ -288,8 +289,10 @@ class FastPipeline(BasePipeline):
                         scene_filename = scene_filename[:22] + "..."
                     
                     # Print progress line
-                    progress_line = f"\rTranscribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}"
-                    print(progress_line, end='', flush=True)
+                    get_gate().update_bar(
+                        f"Transcribing: [{progress_bar}] {scene_num}/{total_scenes} [{progress_pct:.1f}%] | {scene_filename}{eta_text}",
+                        scene=scene_num, scenes=total_scenes, pct=round(progress_pct, 1),
+                    )
                     last_update_time = current_time
                 
                 # Report scene start to async system
@@ -354,7 +357,7 @@ class FastPipeline(BasePipeline):
             
             # Show completion message for scene transcription
             if total_scenes > 0:
-                print(f"\n[DONE] Completed transcription of {total_scenes} scenes")
+                get_gate().end_bar(f"[DONE] Completed transcription of {total_scenes} scenes")
             
             # Finish the subtask progress
             if len(scene_paths) > 1:

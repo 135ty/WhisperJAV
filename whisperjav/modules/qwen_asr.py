@@ -26,6 +26,7 @@ import numpy as np
 import torch
 import stable_whisper
 
+from whisperjav.utils.console_gate import GateProgressBar
 from whisperjav.utils.logger import logger
 from whisperjav.modules.japanese_postprocessor import JapanesePostProcessor
 
@@ -1241,8 +1242,6 @@ class QwenASR:
             List of raw transcription text strings (one per audio file).
             Empty string for scenes that produced no speech.
         """
-        from tqdm import tqdm
-
         n = len(audio_paths)
         if n == 0:
             return []
@@ -1277,11 +1276,13 @@ class QwenASR:
         texts = []
         batch_start = time.time()
 
-        with tqdm(
+        # ConsoleGate progress: renders as a terminal \r bar (CLI) or a
+        # rate-limited structured PROGRESS record (GUI/pipe), replacing the
+        # old tqdm bar whose \r frames piled up inside GUI pipes.
+        with GateProgressBar(
             total=n,
             desc="ASR Text Gen",
             unit="scene",
-            bar_format="{desc} {bar} {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
         ) as pbar:
             for i in range(n):
                 dur = audio_durations[i] if audio_durations else None
@@ -1364,8 +1365,6 @@ class QwenASR:
             List of ForcedAlignResult objects (one per scene).
             None for scenes with empty text (silence/music).
         """
-        from tqdm import tqdm
-
         n = len(audio_paths)
         if n != len(texts):
             raise ValueError(
@@ -1404,11 +1403,11 @@ class QwenASR:
 
         batch_start = time.time()
 
-        with tqdm(
+        # ConsoleGate progress (see _batch_generate note above).
+        with GateProgressBar(
             total=n_with_text,
             desc="Aligning",
             unit="scene",
-            bar_format="{desc} {bar} {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
         ) as pbar:
             for k, idx in enumerate(to_align_indices):
                 dur = audio_durations[idx] if audio_durations else None
