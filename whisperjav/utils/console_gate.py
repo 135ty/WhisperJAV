@@ -139,10 +139,90 @@ class ConsoleGate:
         # write_line/update_bar must bypass the filter streams, not feed
         # them (which would recurse/drop their own output).
         self._direct_stream = None
+        # Active top-level progress scope (file-level: scene X of N).
+        # Inner bars (GateProgressBar) are rendered COMBINED with it, so
+        # the console line / GUI progress always shows the big picture:
+        #   "Transcribing: 12/45 [26%] | ASR Text Gen 3/8"
+        self._scope_label = ""
+        self._scope_current = 0
+        self._scope_total = 0
+        self._scope_start = 0.0
+        # Reentrancy guard: update_scope renders through update_bar and
+        # must not be prefixed with itself.
+        self._scope_rendering = False
 
     def _out(self):
         """The stream gate output goes to (never a quiet() filter stream)."""
         return self._direct_stream if self._direct_stream is not None else sys.stdout
+
+    # ------------------------------------------------------------------
+    # Top-level scope (file-level scene progress)
+    # ------------------------------------------------------------------
+
+    def scope_active(self) -> bool:
+        return self._scope_total > 0
+
+    def update_scope(self, current: int, total: int, label: str = ""):
+        """Set/advance the file-level scope (scene ``current`` of ``total``).
+
+        Renders its own bar line; inner bars rendered afterwards are
+        prefixed with this scope so the display stays one line.
+        """
+        if not self._enabled:
+            return
+        with self._lock:
+            if label:
+                self._scope_label = label
+            if not self._scope_start or total != self._scope_total or current < self._scope_current:
+                self._scope_start = time.time()
+            self._scope_current = current
+            self._scope_total = total
+        pct = (current / total * 100.0) if total else 0.0
+        self._scope_rendering = True
+        try:
+            self.update_bar(
+                self._scope_text(),
+                scene=current, scenes=total, pct=round(pct, 1),
+                eta=self._scope_eta(),
+            )
+        finally:
+            self._scope_rendering = False
+
+    def clear_scope(self):
+        """Drop the file-level scope (end of the scoped phase)."""
+        with self._lock:
+            self._scope_label = ""
+            self._scope_current = 0
+            self._scope_total = 0
+            self._scope_start = 0.0
+
+    def _scope_pct(self) -> float:
+        if self._scope_total:
+            return self._scope_current / self._scope_total * 100.0
+        return 0.0
+
+    def _scope_eta(self):
+        """ETA seconds for the scope, or None when not yet measurable."""
+        if not self._scope_total or self._scope_current < 1:
+            return None
+        elapsed = time.time() - self._scope_start
+        if elapsed <= 0:
+            return None
+        per = elapsed / self._scope_current
+        remaining = (self._scope_total - self._scope_current) * per
+        return round(remaining)
+
+    def _scope_text(self) -> str:
+        pct = self._scope_pct()
+        eta = self._scope_eta()
+        width = 24
+        filled = int(width * self._scope_current / self._scope_total) if self._scope_total else 0
+        bar = "=" * filled + "-" * (width - filled)
+        label = self._scope_label or "Processing"
+        eta_text = ""
+        if eta is not None:
+            eta_text = f" | ETA: {eta / 60:.1f}m" if eta > 60 else f" | ETA: {eta:.0f}s"
+        return f"{label}: [{bar}] {self._scope_current}/{self._scope_total} [{pct:.1f}%]{eta_text}"
 
     # ------------------------------------------------------------------
     # Configuration
@@ -198,6 +278,19 @@ class ConsoleGate:
         """
         if not self._enabled:
             return
+
+        # Combine with the active file-level scope: inner bars (e.g. the
+        # per-scene "ASR Text Gen" bar) are prefixed with the scene-level
+        # picture, and pipe-mode records carry the file-level numbers.
+        if self.scope_active() and not self._scope_rendering:
+            fields = dict(fields)
+            fields.setdefault("scene", self._scope_current)
+            fields.setdefault("scenes", self._scope_total)
+            fields.setdefault("pct", round(self._scope_pct(), 1))
+            eta = self._scope_eta()
+            if eta is not None:
+                fields.setdefault("eta", eta)
+            text = f"{self._scope_text()} | {text}"
 
         if self._verbose:
             # Bypass: legacy raw in-place print.
