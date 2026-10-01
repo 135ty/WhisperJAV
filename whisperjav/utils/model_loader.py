@@ -2,8 +2,11 @@
 
 Monkeypatches huggingface_hub.snapshot_download() and hf_hub_download()
 to gracefully handle network errors (SSL failures, timeouts, proxy issues)
-with a 3-step fallback strategy:
+with a 4-step strategy:
 
+    0. If the files are already in the local cache, return them without any
+       network access (cache-first: loading an already-downloaded model must
+       not require a proxy / VPN)
     1. Normal download from huggingface.co
     2. Load from local cache (local_files_only=True)
     3. Download from hf-mirror.com (official China mirror)
@@ -103,7 +106,10 @@ def _hub_offline() -> bool:
 def _make_resilient_wrapper(original_fn, fn_name):
     """Create a resilient wrapper for a HuggingFace Hub download function.
 
-    3-step fallback on SSL/network errors:
+    4-step strategy on every call:
+      0. Cache-first: if the cache already holds the files, return them with
+         no network access at all. Only a cache miss falls through, so an
+         already-downloaded model loads without a proxy/VPN.
       1. Try normal download from huggingface.co
       2. Try loading from local cache (local_files_only=True)
       3. Try downloading from hf-mirror.com (official China mirror)
@@ -118,6 +124,30 @@ def _make_resilient_wrapper(original_fn, fn_name):
         # original raise its own exception classes, which transformers tolerates.
         if kwargs.get("local_files_only") or _hub_offline():
             return original_fn(*args, **kwargs)
+
+        # --- Step 0: cache-first. A caller asking for a *download* it can't
+        # get out of (force_download / force_extract) skips this. A cache hit
+        # is any successful return; a miss raises (LocalEntryNotFoundError,
+        # which is an OSError). A non-OSError failure (bad args, permissions)
+        # propagates unchanged — it would fail online too.
+        if not (kwargs.get("force_download") or kwargs.get("force_extract")):
+            resource_id_0 = args[0] if args else kwargs.get("repo_id", "unknown")
+            try:
+                result = original_fn(
+                    *args, **{**kwargs, "local_files_only": True}
+                )
+                logger.debug(
+                    "[HF Download] Step 0 — '%s' found in local cache; "
+                    "skipping network entirely.",
+                    resource_id_0,
+                )
+                return result
+            except OSError:
+                pass  # cache miss -> fall through to the normal flow
+            except TypeError:
+                # Some call sites pass kwargs the local-only call cannot
+                # accept together; fall through rather than break them.
+                pass
 
         try:
             return original_fn(*args, **kwargs)
@@ -234,10 +264,11 @@ def patch_hf_hub_downloads():
     On SSL/connection/timeout errors, uses a 3-step fallback with full
     diagnostic logging at each step:
 
-    1. Normal download fails     -> log error type and source URL
-    2. Try local cache           -> success: continue; fail: try mirror
-    3. Try hf-mirror.com (China) -> success: model cached for future use
-    4. All failed                -> comprehensive diagnostic summary with
+    1. Cache hit                -> returned with zero network access
+    2. Normal download fails     -> log error type and source URL
+    3. Try local cache           -> success: continue; fail: try mirror
+    4. Try hf-mirror.com (China) -> success: model cached for future use
+    5. All failed                -> comprehensive diagnostic summary with
                                     manual download instructions
     """
     global _patched
