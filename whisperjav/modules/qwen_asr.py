@@ -29,6 +29,7 @@ import stable_whisper
 from whisperjav.utils.console_gate import GateProgressBar
 from whisperjav.utils.logger import logger
 from whisperjav.modules.japanese_postprocessor import JapanesePostProcessor
+from whisperjav.utils.offline_mode import load_cached_first
 
 
 def _as_audiolike(entry):
@@ -622,7 +623,10 @@ class QwenASR:
                 os.getpid(), self.model_id
             )
 
-            self.model = Qwen3ASRModel.from_pretrained(
+            # Cache-first load (#415): use the local HF cache when complete;
+            # only a genuine cache miss falls back to downloading from the hub.
+            self.model = load_cached_first(
+                Qwen3ASRModel,
                 self.model_id,
                 **model_kwargs
             )
@@ -1146,8 +1150,11 @@ class QwenASR:
                 model_kwargs["attn_implementation"] = attn_impl
 
             # NO forced_aligner argument — text-only mode
-            self.model = Qwen3ASRModel.from_pretrained(
-                self.model_id, **model_kwargs
+            # Cache-first load (#415): local cache when complete, hub download on miss.
+            self.model = load_cached_first(
+                Qwen3ASRModel,
+                self.model_id,
+                **model_kwargs
             )
 
             load_time = time.time() - start_time
@@ -1197,7 +1204,8 @@ class QwenASR:
         try:
             from qwen_asr.inference.qwen3_forced_aligner import Qwen3ForcedAligner
 
-            self._standalone_aligner = Qwen3ForcedAligner.from_pretrained(
+            self._standalone_aligner = load_cached_first(
+                Qwen3ForcedAligner,
                 self.aligner_id,
                 dtype=self._dtype,
                 device_map=self._device,
