@@ -860,6 +860,22 @@ body {
     text-align: right;
 }
 
+/* Auxiliary progress rows (files / stage / ASR text gen).
+   Hidden while idle: the app shows a row when its first PROGRESS
+   record for that channel arrives, and hides all of them when the
+   run ends. The explicit [hidden] rule is required because
+   .progress-container sets display:flex, which would override the
+   UA default for the hidden attribute. */
+.progress-container[hidden] {
+    display: none;
+}
+
+.aux-progress .status-label.aux-label {
+    min-width: 38px;
+    color: var(--text-secondary, #888);
+    text-align: left;
+}
+
 /* ============================================================
    Console Section
    ============================================================ */

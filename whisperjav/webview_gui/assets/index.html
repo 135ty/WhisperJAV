@@ -1150,12 +1150,34 @@
             <!-- Run Controls Section -->
             <section class="section run-section">
                 <div class="section-content">
-                    <!-- Progress Bar -->
+                    <!-- Progress Bars: total files (top) → pipeline stage → transcribing (main) → ASR text gen.
+                         The three auxiliary rows are hidden while idle and shown only during a run. -->
+                    <div class="progress-container aux-progress" id="filesProgressRow" hidden>
+                        <span class="status-label aux-label">Files</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="filesProgressFill"></div>
+                        </div>
+                        <span class="status-label" id="filesStatusLabel">—</span>
+                    </div>
+                    <div class="progress-container aux-progress" id="stageProgressRow" hidden>
+                        <span class="status-label aux-label">Stage</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="stageProgressFill"></div>
+                        </div>
+                        <span class="status-label" id="stageStatusLabel">—</span>
+                    </div>
                     <div class="progress-container">
                         <div class="progress-bar" id="progressBar">
                             <div class="progress-fill" id="progressFill"></div>
                         </div>
                         <span class="status-label" id="statusLabel">Idle</span>
+                    </div>
+                    <div class="progress-container aux-progress" id="asrProgressRow" hidden>
+                        <span class="status-label aux-label">ASR</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="asrProgressFill"></div>
+                        </div>
+                        <span class="status-label" id="asrStatusLabel">—</span>
                     </div>
 
                     <!-- Control Buttons -->

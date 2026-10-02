@@ -11,6 +11,34 @@ from contextlib import contextmanager
 
 from whisperjav.utils.unified_progress import UnifiedProgressManager
 from whisperjav.utils.logger import logger
+from whisperjav.utils.console_gate import get_gate
+
+
+def _emit_files_progress(file_number: int, total_files: int):
+    """GUI-only record: total-files bar ("files" channel).
+
+    No-op in terminal runs — the ConsoleGate drops it there.
+    """
+    total_files = max(total_files, 1)
+    get_gate().emit_pipe(
+        "files",
+        f"File {file_number}/{total_files}",
+        file=file_number,
+        files=total_files,
+        pct=round(file_number / total_files * 100.0, 1),
+    )
+
+
+def _emit_stage_progress(step_name: str, step_number: int, total_steps: int):
+    """GUI-only record: pipeline-stage bar ("stage" channel)."""
+    total_steps = max(total_steps, 1)
+    get_gate().emit_pipe(
+        "stage",
+        f"Step {step_number}/{total_steps}: {step_name}",
+        step=step_number,
+        steps=total_steps,
+        pct=round(step_number / total_steps * 100.0, 1),
+    )
 
 
 class ProgressDisplayAdapter:
@@ -43,15 +71,17 @@ class ProgressDisplayAdapter:
         self.current_file_context = self.unified_manager.start_file_processing(
             filename, file_number, self.total_files
         )
-    
+        _emit_files_progress(file_number, self.total_files)
+
     def set_current_step(self, step_name: str, step_number: Optional[int] = None, total_steps: int = 5):
         """Set current processing step."""
         if step_number is None:
             step_number = 1
-            
+
         self.current_step_context = self.unified_manager.start_step(
             step_name, step_number, total_steps, self.current_file_context
         )
+        _emit_stage_progress(step_name, step_number, total_steps)
     
     def start_subtask(self, task_name: str, total_items: int):
         """Start a subtask (e.g., scene transcription)."""
@@ -107,9 +137,9 @@ class ProgressDisplayAdapter:
 
 class DummyProgressAdapter:
     """Dummy adapter that routes everything to logger when progress is disabled."""
-    
-    def __init__(self):
-        pass
+
+    def __init__(self, total_files: Optional[int] = None):
+        self.total_files = total_files
     
     def close(self):
         pass
@@ -119,10 +149,12 @@ class DummyProgressAdapter:
     
     def set_current_file(self, filename: str, file_number: int):
         logger.info(f"\nProcessing file {file_number}: {Path(filename).name}")
-    
+        _emit_files_progress(file_number, self.total_files or 1)
+
     def set_current_step(self, step_name: str, step_number: Optional[int] = None, total_steps: int = 5):
         if step_number:
             logger.info(f"Step {step_number}/{total_steps}: {step_name}")
+            _emit_stage_progress(step_name, step_number, total_steps)
         else:
             logger.info(step_name)
     

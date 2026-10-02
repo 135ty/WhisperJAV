@@ -156,6 +156,8 @@ class ConsoleGate:
         # Reentrancy guard: update_scope renders through update_bar and
         # must not be prefixed with itself.
         self._scope_rendering = False
+        # Per-channel last-emit timestamps for emit_pipe() rate limiting.
+        self._pipe_channel_emit: dict = {}
 
     def _out(self):
         """The stream gate output goes to (never a quiet() filter stream)."""
@@ -278,7 +280,9 @@ class ConsoleGate:
         """Draw (or emit) the progress bar. The only bar renderer.
 
         ``fields`` carry structured progress (scene, scenes, pct, eta...)
-        used by pipe-mode consumers (the GUI progress bar).
+        used by pipe-mode consumers (the GUI progress bar). An explicit
+        ``channel`` field routes the record to a specific GUI bar (e.g.
+        ``"asr"``); records without one belong to the main bar.
         """
         if not self._enabled:
             return
@@ -286,14 +290,17 @@ class ConsoleGate:
         # Combine with the active file-level scope: inner bars (e.g. the
         # per-scene "ASR Text Gen" bar) are prefixed with the scene-level
         # picture, and pipe-mode records carry the file-level numbers.
+        # Channelled records (GUI sub-bars) are exempt from the fold, but
+        # ONLY in pipe mode — the terminal display keeps the combined line.
         if self.scope_active() and not self._scope_rendering:
-            if not self._is_terminal():
+            if self._is_terminal():
+                text = f"{self._scope_text()} | {text}"
+            elif not fields.get("channel"):
                 # Pipe consumers (GUI) see ONLY the file-level scope records.
                 # Fast inner frames are folded into the scope and emit nothing
                 # of their own, so the GUI progress advances once per scene
                 # instead of racing with the in-block bar.
                 return
-            text = f"{self._scope_text()} | {text}"
 
         if self._verbose:
             # Bypass: legacy raw in-place print.
@@ -324,11 +331,20 @@ class ConsoleGate:
                 self._last_update = time.time()
         else:
             # Pipe mode: rate-limited structured progress records.
+            # Channelled records (GUI sub-bars) go through emit_pipe's
+            # PER-CHANNEL limiter — the shared one below would let busy
+            # main-bar records starve the sub-bars.
+            if fields.get("channel"):
+                inner = dict(fields)
+                channel = inner.pop("channel")
+                self.emit_pipe(channel, text, **inner)
+                return
             now = time.time()
             if now - self._last_pipe_emit < PIPE_EMIT_INTERVAL and not fields.get("final"):
                 return
             payload = dict(fields)
             payload.setdefault("detail", text)
+            payload.setdefault("channel", "main")
             try:
                 payload["pct"] = round(float(payload.get("pct", 0.0)), 1)
             except (TypeError, ValueError):
@@ -342,6 +358,36 @@ class ConsoleGate:
                 except Exception:
                     return
                 self._last_pipe_emit = now
+
+    def emit_pipe(self, channel: str, text: str, **fields):
+        """Emit a GUI-only structured progress record on ``channel``.
+
+        No-op unless running in pipe mode (GUI subprocess) — the terminal
+        display is untouched. Used for the GUI's auxiliary bars: total
+        files ("files"), pipeline stage ("stage"), and any other channel
+        the frontend knows about. Rate-limited per channel.
+        """
+        if not self._enabled or self._verbose or self._is_terminal():
+            return
+        now = time.time()
+        if now - self._pipe_channel_emit.get(channel, 0.0) < PIPE_EMIT_INTERVAL and not fields.get("final"):
+            return
+        payload = dict(fields)
+        payload["channel"] = channel
+        payload.setdefault("detail", text)
+        try:
+            payload["pct"] = round(float(payload.get("pct", 0.0)), 1)
+        except (TypeError, ValueError):
+            pass
+        line = PROGRESS_PREFIX + json.dumps(payload, ensure_ascii=False)
+        with self._lock:
+            self._pipe_channel_emit[channel] = now
+            try:
+                out = self._out()
+                out.write(line + "\n")
+                out.flush()
+            except Exception:
+                return
 
     def write_line(self, text: str):
         """Print a full line, allowed to break the bar (errors, [DONE])."""
@@ -457,6 +503,9 @@ class GateProgressBar:
         self.total = total or 0
         self.n = 0
         self.desc = desc
+        # Optional GUI channel (e.g. "asr"): pipe-mode records carry it so
+        # the GUI can render this bar separately from the main one.
+        self.channel = kwargs.get("channel")
 
     def __enter__(self):
         return self
@@ -478,9 +527,12 @@ class GateProgressBar:
         # Same bar style as the file-level scope bar, so the combined line
         # reads e.g.
         #   Transcribing: [======----] 12/45 [26.7%] | ETA: 3.2m | ASR Text Gen: [============] 8/8
+        fields = dict(scene=self.n, scenes=self.total, pct=self._pct())
+        if self.channel:
+            fields["channel"] = self.channel
         get_gate().update_bar(
             f"{self.desc}: [{_format_bar(self.n, self.total)}] {self.n}/{self.total}",
-            scene=self.n, scenes=self.total, pct=self._pct(),
+            **fields,
         )
 
     def _pct(self):
