@@ -642,6 +642,56 @@ class WhisperJAVAPI:
                 "message": f"Failed to cancel process: {e}"
             }
 
+    def is_busy(self) -> bool:
+        """
+        Check whether any background work (ASR pipeline or translation) is running.
+
+        Used by the window close-confirmation handler (webview_gui/main.py) to
+        decide whether to prompt the user before exiting.
+
+        Returns:
+            bool: True if the main pipeline or a translation job is running.
+        """
+        self._init_translation_state()
+
+        # Main pipeline: refresh stale state the same way get_process_status does
+        if self.process is not None and self.process.poll() is not None:
+            self.exit_code = self.process.returncode
+            self.process = None
+            if self.status != "cancelled":
+                self.status = "completed" if self.exit_code == 0 else "error"
+
+        main_running = self.status == "running" or self.process is not None
+
+        # Translation pipeline
+        if self._translate_process is not None and self._translate_process.poll() is not None:
+            self._translate_process = None
+            if self._translate_status == "running":
+                self._translate_status = "completed"
+        translate_running = self._translate_status == "running" or self._translate_process is not None
+
+        return main_running or translate_running
+
+    def shutdown_all(self) -> None:
+        """
+        Terminate all running background work (best effort).
+
+        Called when the user confirms exit from the close-confirmation dialog
+        so no orphaned ASR/translation child processes survive the GUI.
+        """
+        try:
+            if self.process is not None:
+                self.cancel_process()
+        except Exception:
+            pass
+
+        try:
+            self._init_translation_state()
+            if self._translate_process is not None:
+                self.cancel_translation()
+        except Exception:
+            pass
+
     def get_process_status(self) -> Dict[str, Any]:
         """
         Get current process status.
