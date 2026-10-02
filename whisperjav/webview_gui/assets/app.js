@@ -1040,8 +1040,13 @@ const ProcessManager = {
                 // should act; the rest must exit here.
                 if (!AppState.statusPollInterval) return;
 
-                // Update status label
-                ProgressManager.setStatus(this.formatStatus(status.status));
+                // Update status label — but only for terminal states. While the
+                // process is running, the CLI's PROGRESS records (e.g.
+                // "Transcribing… 42%") own the status text; writing 'Running...'
+                // here every 500ms would keep overwriting that percentage.
+                if (status.status !== 'running') {
+                    ProgressManager.setStatus(this.formatStatus(status.status));
+                }
 
                 // Check if process finished
                 if (status.status === 'completed' ||
