@@ -89,6 +89,34 @@ SCENE_EXTRACTION_SR = 48000
 # Target SR for VAD/ASR — also the extraction SR when enhancer is "none"
 TARGET_SAMPLE_RATE = 16000
 
+# Clear the CUDA cache only when it has actually grown large. Clearing it
+# unconditionally after every scene forced WDDM (Windows) to free and then
+# re-allocate gigabytes of VRAM per scene, evicting the desktop and other
+# apps' GPU memory each time — the whole machine froze for 3-5 seconds per
+# scene. PyTorch's caching allocator reuses blocks between scenes when we
+# leave it alone, so the threshold is only a safety valve for small cards.
+_CUDA_CACHE_CLEAR_THRESHOLD_BYTES = 6 * 1024 ** 3  # 6 GiB
+
+
+def _conditionally_clear_cuda_cache(context: str = "") -> None:
+    """Empty the CUDA cache only if its size exceeds the safety threshold."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        reserved = torch.cuda.memory_reserved()
+        if reserved >= _CUDA_CACHE_CLEAR_THRESHOLD_BYTES:
+            torch.cuda.empty_cache()
+            logger.debug(
+                "%s: CUDA cache %d MiB >= %d MiB threshold, cleared",
+                context, reserved // (1024 ** 2),
+                _CUDA_CACHE_CLEAR_THRESHOLD_BYTES // (1024 ** 2),
+            )
+    except ImportError:
+        pass
+    except Exception as cuda_err:
+        logger.debug("%s: CUDA cache clear check failed: %s", context, cuda_err)
+
 
 def create_enhancer_from_config(
     resolved_config: Dict[str, Any],
@@ -466,10 +494,9 @@ def enhance_scenes(
                 start_sec, end_sec, dur_sec))
 
         finally:
-            # Aggressive memory cleanup for 8GB VRAM GPUs
-            # PyTorch's memory caching allocator holds onto CUDA memory between
-            # loop iterations, causing OOM on scene 8+ if not explicitly released.
-            # This cleanup ensures bounded memory usage regardless of scene count.
+            # Aggressive memory cleanup, historically for 8GB VRAM GPUs
+            # (OOM on scene 8+). Since 2026-10 the CUDA cache itself is
+            # cleared conditionally — see _conditionally_clear_cuda_cache.
             try:
                 # Delete references to large arrays/tensors
                 try:
@@ -488,17 +515,12 @@ def enhance_scenes(
                 # Force Python garbage collection to release tensor references
                 gc.collect()
 
-                # Return PyTorch's cached memory to CUDA driver
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        logger.debug(f"Scene {scene_num}/{total_scenes}: CUDA cache cleared")
-                except ImportError:
-                    pass  # torch not available, skip CUDA cleanup
-                except Exception as cuda_err:
-                    # CUDA context may be corrupted - log but continue
-                    logger.debug(f"Scene {scene_num}/{total_scenes}: CUDA cache clear failed: {cuda_err}")
+                # Return PyTorch's cached memory to the CUDA driver, but only
+                # when the cache has grown past the safety threshold — an
+                # unconditional per-scene empty_cache() made WDDM evict the
+                # desktop's VRAM every scene, freezing the whole machine 3-5s.
+                _conditionally_clear_cuda_cache(
+                    f"Scene {scene_num}/{total_scenes}")
 
             except Exception as cleanup_err:
                 # Non-critical, log and continue processing
@@ -616,11 +638,7 @@ def enhance_single_audio(
             except NameError:
                 pass
             gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
+            # Conditional, not unconditional: see _conditionally_clear_cuda_cache.
+            _conditionally_clear_cuda_cache("enhance_single_audio")
         except Exception:
             pass
