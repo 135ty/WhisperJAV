@@ -95,6 +95,9 @@ class SemanticSceneDetector:
                 config=config,
                 preset=str(self._kwargs.get("preset", "default")),
                 logger_instance=logger,
+                # Forward the optional progress callback (0-1 fraction +
+                # message) so pipelines can drive their progress bar.
+                progress_callback=self._kwargs.get("progress_callback"),
             )
 
             logger.info("SemanticSceneDetector initialized")

@@ -49,6 +49,7 @@ from whisperjav.modules.srt_postprocessing import SRTPostProcessor, normalize_la
 from whisperjav.modules.srt_stitching import SRTStitcher
 from whisperjav.modules.subtitle_pipeline.types import TimestampMode
 from whisperjav.pipelines.base_pipeline import BasePipeline
+from whisperjav.utils.console_gate import get_gate
 from whisperjav.utils.logger import logger
 
 # Lazy imports to avoid loading heavy modules until needed:
@@ -403,6 +404,25 @@ class QwenPipeline(BasePipeline):
         return "qwen"
 
     # ------------------------------------------------------------------
+    # GUI progress (Stage bar)
+    # ------------------------------------------------------------------
+
+    def _emit_stage(self, step: int, total: int, label: str):
+        """Emit a GUI-only pipeline-stage record ("stage" channel).
+
+        Drives the GUI Stage bar for the 9-phase flow. Terminal display is
+        untouched (emit_pipe is a no-op there); the per-phase logger.info
+        lines remain the terminal narrative.
+        """
+        get_gate().emit_pipe(
+            "stage",
+            f"Step {step}/{total}: {label}",
+            step=step,
+            steps=total,
+            pct=round(step / total * 100.0, 1),
+        )
+
+    # ------------------------------------------------------------------
     # Context resolution
     # ------------------------------------------------------------------
 
@@ -627,6 +647,7 @@ class QwenPipeline(BasePipeline):
         # ==============================================================
         logger.info("[QwenPipeline PID %s] Phase 1: Extracting audio from %s", os.getpid(), input_file.name)
         phase1_start = time.time()
+        self._emit_stage(1, 9, "Extracting audio")
 
         audio_path = self.temp_dir / f"{media_basename}_extracted.wav"
         extracted_audio, duration = self.audio_extractor.extract(input_file, audio_path)
@@ -650,6 +671,7 @@ class QwenPipeline(BasePipeline):
             os.getpid(), self.scene_method, self.safe_chunking,
         )
         phase2_start = time.time()
+        self._emit_stage(2, 9, "Scene detection")
 
         scenes_dir = self.temp_dir / "scenes"
         scenes_dir.mkdir(exist_ok=True)
@@ -679,9 +701,26 @@ class QwenPipeline(BasePipeline):
         if self.scene_clustering_threshold is not None:
             scene_detector_kwargs["clustering_threshold"] = float(self.scene_clustering_threshold)
 
+        # Semantic detection reports real progress (0.05→1.0 with messages).
+        # Route it to the main progress bar (terminal \r bar / GUI main bar)
+        # so the slowest part of Phase 2 is visible. Only wired for the
+        # semantic backend — other backends' constructors would reject the
+        # unknown kwarg.
+        if self.scene_method == "semantic":
+            def _scene_detection_progress(fraction: float, message: str):
+                get_gate().update_bar(
+                    f"Detecting scenes: {message}",
+                    scene=int(fraction * 100),
+                    scenes=100,
+                    pct=round(min(max(fraction, 0.0), 1.0) * 100.0, 1),
+                )
+            scene_detector_kwargs["progress_callback"] = _scene_detection_progress
+
         scene_detector = SceneDetectorFactory.safe_create_from_legacy_kwargs(**scene_detector_kwargs)
         result = scene_detector.detect_scenes(extracted_audio, scenes_dir, media_basename)
         scene_paths = result.to_legacy_tuples()
+        # Finish the detection bar (terminal newline; no-op record in pipe).
+        get_gate().end_bar()
 
         # Tell the user which scenes look acoustically difficult. vad_threshold is
         # None because this pipeline segments with WhisperSeg by default, not with
@@ -739,6 +778,12 @@ class QwenPipeline(BasePipeline):
         # ==============================================================
         logger.info("[QwenPipeline PID %s] Phase 3: Speech enhancement (backend=%s)", os.getpid(), self.enhancer_backend)
         phase3_start = time.time()
+        self._emit_stage(3, 9, f"Speech enhancement ({self.enhancer_backend})")
+
+        # Per-scene enhancement progress → main bar (terminal bar / GUI main
+        # bar), replacing the old logger.debug-only callback.
+        def _enhancement_progress(scene_num, total, scene_name):
+            get_gate().update_scope(scene_num, total, "Enhancing")
 
         # Dual-track paths (populated only when --enhance-for-vad is active)
         _vad_scene_paths = None   # Phase 4 VAD iterates these (enhanced)
@@ -768,9 +813,6 @@ class QwenPipeline(BasePipeline):
                 model=self.enhancer_model,
             )
 
-            def _enhancement_progress(scene_num, total, scene_name):
-                logger.debug(f"Enhancing scene {scene_num}/{total}: {scene_name}")
-
             enhanced_paths = enhance_scenes(
                 scene_paths, enhancer, self.temp_dir,
                 progress_callback=_enhancement_progress,
@@ -795,9 +837,6 @@ class QwenPipeline(BasePipeline):
                 model=self.enhancer_model,
             )
 
-            def _enhancement_progress(scene_num, total, scene_name):
-                logger.debug(f"Enhancing scene {scene_num}/{total}: {scene_name}")
-
             scene_paths = enhance_scenes(
                 scene_paths, enhancer, self.temp_dir,
                 progress_callback=_enhancement_progress,
@@ -814,6 +853,11 @@ class QwenPipeline(BasePipeline):
         if _vad_scene_paths is None:
             _vad_scene_paths = scene_paths
 
+        # Finish the enhancement bar (terminal newline; pipe no-op) and drop
+        # the scope so Phase 4 can start its own.
+        get_gate().end_bar()
+        get_gate().clear_scope()
+
         master_metadata["stages"]["enhancement"] = {
             "backend": self.enhancer_backend,
             "dual_track": _orch_vad_paths is not None,
@@ -829,6 +873,7 @@ class QwenPipeline(BasePipeline):
         if self.segmenter_backend != "none":
             logger.info("[QwenPipeline PID %s] Phase 4: Speech segmentation (backend=%s)", os.getpid(), self.segmenter_backend)
             phase4_start = time.time()
+            self._emit_stage(4, 9, f"Speech segmentation ({self.segmenter_backend})")
 
             from whisperjav.modules.speech_segmentation import SpeechSegmenterFactory
             segmenter_kwargs = dict(self.segmenter_config or {})
@@ -853,6 +898,8 @@ class QwenPipeline(BasePipeline):
             )
 
             for idx, (scene_path, start_sec, end_sec, dur_sec) in enumerate(_vad_scene_paths):
+                # Per-scene segmentation progress → main bar.
+                get_gate().update_scope(idx + 1, len(_vad_scene_paths), "Segmenting")
                 try:
                     seg_result = segmenter.segment(scene_path, sample_rate=16000)
                     speech_regions_per_scene[idx] = seg_result
@@ -867,6 +914,11 @@ class QwenPipeline(BasePipeline):
 
             segmenter.cleanup()
             del segmenter
+
+            # Finish the segmentation bar and drop the scope before the
+            # orchestrator installs its own "Transcribing" scope.
+            get_gate().end_bar()
+            get_gate().clear_scope()
 
             master_metadata["stages"]["segmentation"] = {
                 "backend": self.segmenter_backend,
@@ -883,6 +935,9 @@ class QwenPipeline(BasePipeline):
         logger.info("[QwenPipeline PID %s] Phase 5: ASR transcription (model=%s, mode=%s)",
                     os.getpid(), self.model_id, self.input_mode.value)
         phase5_start = time.time()
+        # The orchestrator loads models inside process_scenes() before the
+        # first scene — say so, so the silent load window reads as work.
+        self._emit_stage(5, 9, "ASR transcription (loading model, then generating)")
 
         # Debug artifacts directory (master text, timestamps, merged words)
         raw_subs_dir = self.temp_dir / "raw_subs"
@@ -994,6 +1049,7 @@ class QwenPipeline(BasePipeline):
         # PHASE 6: SCENE SRT GENERATION (micro-subs)
         # ==============================================================
         logger.info("[QwenPipeline PID %s] Phase 6: Generating scene SRT files", os.getpid())
+        self._emit_stage(6, 9, "Generating scene SRTs")
 
         scene_srts_dir = self.temp_dir / "scene_srts"
         scene_srts_dir.mkdir(exist_ok=True)
@@ -1026,6 +1082,7 @@ class QwenPipeline(BasePipeline):
         # PHASE 7: STITCHING
         # ==============================================================
         logger.info("[QwenPipeline PID %s] Phase 7: Stitching %d scene SRTs", os.getpid(), len(scene_srt_info))
+        self._emit_stage(7, 9, f"Stitching {len(scene_srt_info)} scene SRTs")
 
         stitched_srt_path = self.temp_dir / f"{media_basename}_stitched.srt"
 
@@ -1056,6 +1113,7 @@ class QwenPipeline(BasePipeline):
         # AnimeWhisperCleaner SRT filter to drop ellipsis-only artifact lines
         # ("…", "…?", "…」", etc.) and renumber surviving entries.
         phase8_start = time.time()
+        self._emit_stage(8, 9, "Post-processing subtitles")
 
         # v1.8.12.post2: anime-whisper-specific SRT filter.
         # Operates IN PLACE on stitched_srt_path BEFORE the copy to final.
@@ -1236,6 +1294,7 @@ class QwenPipeline(BasePipeline):
         # ==============================================================
         # PHASE 9: ANALYTICS
         # ==============================================================
+        self._emit_stage(9, 9, "Analytics")
         try:
             from whisperjav.modules.pipeline_analytics import (
                 compute_analytics,
