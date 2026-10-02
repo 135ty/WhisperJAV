@@ -856,11 +856,16 @@ const ConsoleManager = {
     _handleProgressRecord(payload) {
         try {
             const p = JSON.parse(payload);
-            if (typeof p.pct === 'number' && isFinite(p.pct)) {
-                ProgressManager.setProgress(Math.max(0, Math.min(100, p.pct)));
-            }
-            if (p.detail) {
-                ProgressManager.setStatus(p.detail);
+            const channel = p.channel || 'main';
+            if (channel === 'main') {
+                if (typeof p.pct === 'number' && isFinite(p.pct)) {
+                    ProgressManager.setProgress(Math.max(0, Math.min(100, p.pct)));
+                }
+                if (p.detail) {
+                    ProgressManager.setStatus(p.detail);
+                }
+            } else {
+                ProgressManager.setAux(channel, p);
             }
         } catch (e) {
             // Not a valid JSON progress record — ignore silently
@@ -891,10 +896,47 @@ const ProgressManager = {
         this.statusLabel.textContent = text;
     },
 
+    // Auxiliary bars (files / stage / ASR text gen). Each is hidden while
+    // idle, shown when its first channelled PROGRESS record arrives, and
+    // all are hidden again when the run ends (reset/hideAuxBars).
+    _auxBars: {
+        files: { row: 'filesProgressRow', fill: 'filesProgressFill', value: 'filesStatusLabel' },
+        stage: { row: 'stageProgressRow', fill: 'stageProgressFill', value: 'stageStatusLabel' },
+        asr:   { row: 'asrProgressRow',   fill: 'asrProgressFill',   value: 'asrStatusLabel' }
+    },
+
+    setAux(channel, p) {
+        const def = this._auxBars[channel];
+        if (!def) return;
+        const row = document.getElementById(def.row);
+        const fill = document.getElementById(def.fill);
+        const value = document.getElementById(def.value);
+        if (!row || !fill) return;
+        row.hidden = false;
+        if (typeof p.pct === 'number' && isFinite(p.pct)) {
+            fill.style.width = `${Math.max(0, Math.min(100, p.pct))}%`;
+        }
+        if (value) {
+            value.textContent = p.detail || (typeof p.pct === 'number' ? `${p.pct}%` : '—');
+        }
+    },
+
+    hideAuxBars() {
+        for (const def of Object.values(this._auxBars)) {
+            const row = document.getElementById(def.row);
+            const fill = document.getElementById(def.fill);
+            const value = document.getElementById(def.value);
+            if (row) row.hidden = true;
+            if (fill) fill.style.width = '0%';
+            if (value) value.textContent = '—';
+        }
+    },
+
     reset() {
         this.setIndeterminate(false);
         this.setProgress(0);
         this.setStatus('Idle');
+        this.hideAuxBars();
     }
 };
 
@@ -1056,6 +1098,10 @@ const ProcessManager = {
                     // Stop polling
                     this.stopLogPolling();
                     this.stopStatusMonitoring();
+
+                    // The run is over: the auxiliary bars (files / stage /
+                    // ASR text gen) are working-state-only — hide them.
+                    ProgressManager.hideAuxBars();
 
                     // Fetch any remaining logs
                     await this.fetchRemainingLogs();

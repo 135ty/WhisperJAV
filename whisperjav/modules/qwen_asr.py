@@ -1291,6 +1291,7 @@ class QwenASR:
             total=n,
             desc="ASR Text Gen",
             unit="scene",
+            channel="asr",  # GUI: dedicated sub-bar, separate from "Transcribing"
         ) as pbar:
             for i in range(n):
                 dur = audio_durations[i] if audio_durations else None
