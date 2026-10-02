@@ -862,7 +862,18 @@ const ConsoleManager = {
                     ProgressManager.setProgress(Math.max(0, Math.min(100, p.pct)));
                 }
                 if (p.detail) {
-                    ProgressManager.setStatus(p.detail);
+                    ProgressManager.setStatus(this._cleanMainDetail(p.detail));
+                }
+            } else if (channel === 'asr') {
+                // ASR Text Gen sub-bar: show only the description part
+                // (everything before the ASCII bar), e.g.
+                // "ASR Text Gen | Scene 4/11 (2s audio)" — the bar fill
+                // itself carries the n/total progress.
+                if (p.detail) {
+                    let d = String(p.detail);
+                    const cut = d.search(/\s*\[[=\-]{3,}\]/);
+                    if (cut !== -1) d = d.slice(0, cut);
+                    ProgressManager.setAux('asr', { ...p, detail: d.replace(/[:\s]+$/, '') });
                 }
             } else {
                 ProgressManager.setAux(channel, p);
@@ -870,6 +881,18 @@ const ConsoleManager = {
         } catch (e) {
             // Not a valid JSON progress record — ignore silently
         }
+    },
+
+    // Reduce a CLI bar line to "Transcribing: x/y ETA: xxx": drop the ASCII
+    // bar, the [xx.x%] token, and any "| segment" that is not the ETA
+    // (e.g. the per-scene filename in the whisper-family pipelines).
+    _cleanMainDetail(text) {
+        if (typeof text !== 'string') return text;
+        let t = text.replace(/\[[=\-]{3,}\]/g, ' ');
+        t = t.replace(/\[\d+(?:\.\d+)?%\]/g, ' ');
+        const parts = t.split('|').map(s => s.trim()).filter(Boolean);
+        t = [parts[0], ...parts.filter(s => /^ETA:/i.test(s))].join(' ');
+        return t.replace(/\s{2,}/g, ' ').trim();
     },
 };
 
@@ -898,7 +921,8 @@ const ProgressManager = {
 
     // Auxiliary bars (files / stage / ASR text gen). Each is hidden while
     // idle, shown when its first channelled PROGRESS record arrives, and
-    // all are hidden again when the run ends (reset/hideAuxBars).
+    // hidden again when the run ends (reset/hideAuxBars). The ASR bar's
+    // text is trimmed to the part before the ASCII bar (see routing above).
     _auxBars: {
         files: { row: 'filesProgressRow', fill: 'filesProgressFill', value: 'filesStatusLabel' },
         stage: { row: 'stageProgressRow', fill: 'stageProgressFill', value: 'stageStatusLabel' },
