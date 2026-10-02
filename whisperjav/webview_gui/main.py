@@ -360,6 +360,34 @@ def create_window():
 
     window = webview.create_window(**window_kwargs)
 
+    # Close-confirmation: intercept the window close button while work is running.
+    #
+    # pywebview semantics (verified against winforms.py on_closing in pywebview 6.x):
+    # a handler for window.events.closing that returns exactly False cancels the
+    # close; any other return value allows it. The event fires synchronously on
+    # the UI thread, so the blocking native confirmation dialog below is safe.
+    def on_closing(window):
+        try:
+            if not api.is_busy():
+                return True  # Idle: close without prompting
+
+            result = window.create_confirmation_dialog(
+                "确认退出",
+                "WhisperJAV 正在处理任务，退出将终止当前工作且未完成的进度可能丢失。\n\n确定要退出吗？"
+            )
+            if not result:
+                return False  # User chose Cancel: keep the window (and the job) alive
+
+            # User confirmed exit: terminate child processes so no GPU workers survive
+            api.shutdown_all()
+            return True
+        except Exception as e:
+            # Never trap the user in the window because our check failed
+            print(f"Warning: close-confirmation check failed: {e}")
+            return True
+
+    window.events.closing += on_closing
+
     # Return the window along with icon path and whether icon was applied via kwarg
     return window, icon_path, icon_used
 
