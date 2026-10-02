@@ -1546,6 +1546,19 @@ button:focus-visible,
     padding-left: 0;
 }
 
+/* Source audio language row - the label needs more room than the 55px row-label
+   column, so it spans label..sensitivity and the select starts at the scene column */
+#ensemble-language-row.grid-row .col-label {
+    grid-column: 1 / 5;
+    white-space: nowrap;
+}
+#ensemble-language-row.grid-row .col-merge {
+    grid-column: 5 / 9;
+    display: flex;
+    justify-content: flex-start;
+    padding-left: 0;
+}
+
 /* Compact select dropdowns */
 .form-select.compact {
     padding: 4px 6px;

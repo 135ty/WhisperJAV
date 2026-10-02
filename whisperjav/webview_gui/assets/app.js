@@ -1759,6 +1759,18 @@ const EnsembleManager = {
             this.state.serialMode = e.target.checked;
         });
 
+        // Source audio language mirror (Ensemble tab): same setting as the
+        // Transcription tab's #source-language. Both selects stay in sync, and
+        // SettingsPersistence.applyToForm dispatches 'change' on #source-language
+        // when restoring saved settings, which propagates here too.
+        const ensLang = document.getElementById('ensemble-source-language');
+        const srcLang = document.getElementById('source-language');
+        if (ensLang && srcLang) {
+            ensLang.value = srcLang.value;  // initial sync
+            ensLang.addEventListener('change', () => { srcLang.value = ensLang.value; });
+            srcLang.addEventListener('change', () => { ensLang.value = srcLang.value; });
+        }
+
         // Customize buttons
         document.getElementById('customize-pass1').addEventListener('click', () => this.openCustomize('pass1'));
         document.getElementById('customize-pass2').addEventListener('click', () => this.openCustomize('pass2'));

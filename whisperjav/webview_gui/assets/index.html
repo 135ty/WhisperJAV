@@ -843,6 +843,21 @@
                                     </div>
                                 </div>
 
+                                <!-- Source Audio Language Row (mirrors the Transcription tab's
+                                     #source-language select; app.js keeps the two in sync) -->
+                                <div class="grid-row" id="ensemble-language-row">
+                                    <div class="col-label">Source audio language</div>
+                                    <div class="col-merge">
+                                        <select id="ensemble-source-language" class="form-select merge-select"
+                                                title="Language of the audio being transcribed. Same setting as 'Source audio language' on the Transcription Mode tab.">
+                                            <option value="japanese" selected>Japanese (日本語)</option>
+                                            <option value="korean">Korean (한국어)</option>
+                                            <option value="chinese">Chinese (中文)</option>
+                                            <option value="english">English</option>
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <!-- Merge Strategy Row -->
                                 <div class="grid-row" id="merge-row">
                                     <div class="col-label">Merge</div>
