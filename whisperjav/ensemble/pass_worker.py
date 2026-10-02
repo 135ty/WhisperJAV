@@ -290,6 +290,9 @@ class WorkerPayload:
     language_code: str
     log_level: str = "INFO"  # Propagate log level to subprocess workers
     trace_file_path: Optional[str] = None  # Path for parameter tracer output
+    # Total passes in this ensemble run (2 when pass 2 is enabled, else 1).
+    # Lets the worker emit pass-aware GUI progress records.
+    total_passes: int = 2
 
 
 @dataclass
@@ -665,9 +668,25 @@ def run_pass_worker(payload: WorkerPayload, result_file: str) -> None:
         }
         _write_dropbox_and_exit(result_file, error_result, tracer, 1)
 
+    # GUI progress: this worker's stdout is a pipe (GUI console), so the
+    # pass-aware adapter below emits structured records on the files/stage
+    # channels. No-op in terminal runs. Also swapped into the pipeline so
+    # its set_current_step calls (balanced/fidelity/... Step 1..N) drive
+    # the GUI Stage bar inside workers too — they would otherwise hit the
+    # pipeline's local DummyProgress, which only logs.
+    from whisperjav.utils.progress_adapter import DummyProgressAdapter
+    worker_progress = DummyProgressAdapter(
+        total_files=len(media_files),
+        pass_number=pass_number,
+        passes=payload.total_passes,
+    )
+    if hasattr(pipeline, "progress"):
+        pipeline.progress = worker_progress
+
     try:
-        for media_info in media_files:
+        for file_idx, media_info in enumerate(media_files, 1):
             basename = media_info["basename"]
+            worker_progress.set_current_file(basename, file_idx)
             logger.info(
                 "[Worker %s] Pass %s processing %s",
                 os.getpid(),

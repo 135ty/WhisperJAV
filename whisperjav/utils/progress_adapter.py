@@ -14,18 +14,31 @@ from whisperjav.utils.logger import logger
 from whisperjav.utils.console_gate import get_gate
 
 
-def _emit_files_progress(file_number: int, total_files: int):
+def _emit_files_progress(file_number: int, total_files: int,
+                         pass_number: Optional[int] = None,
+                         passes: Optional[int] = None):
     """GUI-only record: total-files bar ("files" channel).
 
-    No-op in terminal runs — the ConsoleGate drops it there.
+    No-op in terminal runs — the ConsoleGate drops it there. In ensemble
+    (two-pass) runs the record carries the pass number, and pct is the
+    OVERALL position across all passes, so the GUI files bar advances
+    monotonically from the first file of pass 1 to the last of pass 2.
     """
     total_files = max(total_files, 1)
+    passes = max(passes or 1, 1)
+    pass_number = min(max(pass_number or 1, 1), passes)
+    overall = ((pass_number - 1) * total_files + file_number) / (passes * total_files) * 100.0
+    if passes > 1:
+        label = f"Pass {pass_number}/{passes} · File {file_number}/{total_files}"
+    else:
+        label = f"File {file_number}/{total_files}"
     get_gate().emit_pipe(
         "files",
-        f"File {file_number}/{total_files}",
+        label,
         file=file_number,
         files=total_files,
-        pct=round(file_number / total_files * 100.0, 1),
+        **{"pass": pass_number, "passes": passes},
+        pct=round(overall, 1),
     )
 
 
@@ -138,8 +151,14 @@ class ProgressDisplayAdapter:
 class DummyProgressAdapter:
     """Dummy adapter that routes everything to logger when progress is disabled."""
 
-    def __init__(self, total_files: Optional[int] = None):
+    def __init__(self, total_files: Optional[int] = None,
+                 pass_number: Optional[int] = None,
+                 passes: Optional[int] = None):
         self.total_files = total_files
+        # Ensemble pass context (None for single-pass runs): makes the
+        # files-channel GUI record pass-aware ("Pass 1/2 · File i/N").
+        self.pass_number = pass_number
+        self.passes = passes
     
     def close(self):
         pass
@@ -149,7 +168,8 @@ class DummyProgressAdapter:
     
     def set_current_file(self, filename: str, file_number: int):
         logger.info(f"\nProcessing file {file_number}: {Path(filename).name}")
-        _emit_files_progress(file_number, self.total_files or 1)
+        _emit_files_progress(file_number, self.total_files or 1,
+                             pass_number=self.pass_number, passes=self.passes)
 
     def set_current_step(self, step_name: str, step_number: Optional[int] = None, total_steps: int = 5):
         if step_number:
