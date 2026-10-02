@@ -161,6 +161,7 @@ class EnsembleOrchestrator:
             media_files=serialized_media,
             pass_config=pass1_config,
             language_code=pass_languages[1],
+            total_passes=2 if pass2_config else 1,
         )
 
         # Trace pass 1 complete
@@ -211,6 +212,7 @@ class EnsembleOrchestrator:
                 media_files=serialized_media,
                 pass_config=pass2_config,
                 language_code=pass_languages[2],
+                total_passes=2,
             )
 
             # Trace pass 2 complete
@@ -238,6 +240,16 @@ class EnsembleOrchestrator:
 
         all_metadata: List[Dict[str, Any]] = []
         table_rows: List[Dict[str, str]] = []
+
+        # GUI progress: the merge phase runs in this parent process (no
+        # worker, so no pipeline records) — announce it on the stage
+        # channel so the GUI Stage bar does not freeze on the last pass-2
+        # step during merging. No-op in terminal runs.
+        from whisperjav.utils.console_gate import get_gate
+        get_gate().emit_pipe(
+            "stage", "Merging pass outputs",
+            step=2, steps=2, pct=100.0,
+        )
 
         for media_info in serialized_media:
             metadata, row = self._process_single_file_merge(
@@ -529,6 +541,7 @@ class EnsembleOrchestrator:
                 media_files=[media_info],
                 pass_config=pass1_config,
                 language_code=pass_languages[1],
+                total_passes=2 if pass2_config else 1,
             )
 
             # --- Pass 2 (if enabled) ---
@@ -543,6 +556,7 @@ class EnsembleOrchestrator:
                     media_files=[media_info],
                     pass_config=pass2_config,
                     language_code=pass_languages[2],
+                    total_passes=2,
                 )
 
             # --- Merge + metadata (reuses shared method) ---
@@ -616,6 +630,7 @@ class EnsembleOrchestrator:
         media_files: List[Dict[str, Any]],
         pass_config: Dict[str, Any],
         language_code: str,
+        total_passes: int = 2,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Execute a pass inside an isolated worker process.
@@ -644,6 +659,7 @@ class EnsembleOrchestrator:
             language_code=language_code,
             log_level=self.log_level,
             trace_file_path=trace_file_path,
+            total_passes=total_passes,
         )
 
         # Setup Drop-Box path (unique per pass)
