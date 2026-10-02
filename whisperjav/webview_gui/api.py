@@ -3739,6 +3739,8 @@ class WhisperJAVAPI:
             self._translate_files_total = 0
             self._translate_files_completed = 0
             self._translate_current_file = None
+            self._translate_batch_done = 0
+            self._translate_batch_total = 0
 
     def get_translation_providers(self) -> Dict[str, Any]:
         """
@@ -4302,6 +4304,8 @@ class WhisperJAVAPI:
         self._translate_files_total = 0
         self._translate_files_completed = 0
         self._translate_current_file = None
+        self._translate_batch_done = 0
+        self._translate_batch_total = 0
 
         try:
             # Build CLI arguments
@@ -4435,9 +4439,19 @@ class WhisperJAVAPI:
                     if m:
                         self._translate_files_total = int(m.group(2))
                         self._translate_current_file = m.group(3).strip()
+                        # New file started — reset per-file batch progress
+                        self._translate_batch_done = 0
+                        self._translate_batch_total = 0
+                    # Parse batch progress: "[TRANSLATE] Batch progress: 7/23"
+                    mb = re.search(r'\[TRANSLATE\] Batch progress:\s*(\d+)/(\d+)', line)
+                    if mb:
+                        self._translate_batch_done = int(mb.group(1))
+                        self._translate_batch_total = int(mb.group(2))
                     # Parse completion: "Complete: file_a.english.srt"
                     if 'Complete:' in line:
                         self._translate_files_completed += 1
+                        self._translate_batch_done = 0
+                        self._translate_batch_total = 0
                     # Capture error messages for GUI display
                     if 'TRANSLATION FAILED' in line:
                         self._translate_error = 'Translation failed — no subtitles were translated'
@@ -4512,7 +4526,19 @@ class WhisperJAVAPI:
 
         files_total = getattr(self, '_translate_files_total', 0)
         files_completed = getattr(self, '_translate_files_completed', 0)
-        progress = int(100 * files_completed / max(files_total, 1)) if files_total > 0 else 0
+        batch_done = getattr(self, '_translate_batch_done', 0)
+        batch_total = getattr(self, '_translate_batch_total', 0)
+
+        # File-level progress, refined by the current file's batch progress
+        # (parsed from "[TRANSLATE] Batch progress: 7/23" lines). This keeps
+        # the bar moving while a large file is still being translated.
+        file_fraction = 0.0
+        if batch_total > 0:
+            file_fraction = min(batch_done / batch_total, 1.0)
+        if files_total > 0:
+            progress = int(100 * min(files_completed + file_fraction, files_total) / files_total)
+        else:
+            progress = 0
 
         return {
             "status": self._translate_status,
@@ -4520,6 +4546,8 @@ class WhisperJAVAPI:
             "current_file": getattr(self, '_translate_current_file', None),
             "files_completed": files_completed,
             "files_total": files_total,
+            "batch_done": batch_done,
+            "batch_total": batch_total,
             "has_logs": not self._translate_log_queue.empty(),
             "error": self._translate_error,
         }

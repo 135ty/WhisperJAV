@@ -7744,9 +7744,13 @@ const TranslatorManager = {
                     this.setProgress(status.progress);
                 }
 
-                // Update current file display
+                // Update current file display (with batch-level progress when available)
                 if (status.current_file) {
-                    this.setStatus(`Translating: ${status.current_file}`);
+                    let label = `Translating: ${status.current_file}`;
+                    if (status.batch_total > 0) {
+                        label += ` — batch ${status.batch_done}/${status.batch_total}`;
+                    }
+                    this.setStatus(label);
                 }
 
                 // Fetch logs

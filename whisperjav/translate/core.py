@@ -679,6 +679,43 @@ def translate_subtitle(
         # =========================================================================
         _batch_stats = {'total': 0, 'success': 0, 'no_matches': 0, 'errors': 0}
 
+        # =========================================================================
+        # Batch-level progress reporting (GUI determinate progress bar)
+        # =========================================================================
+        # PySubtrans batches all subtitles BEFORE translating: the `preprocessed`
+        # event delivers the final scenes, so the total batch count is known
+        # upfront. Each completed batch (including resume-skipped ones) fires
+        # `batch_translated`. We print one machine-parseable line per batch:
+        #   [TRANSLATE] Batch progress: 7/23
+        # which webview_gui/api.py parses to drive a determinate progress bar.
+        _progress = {'total_batches': 0, 'done_batches': 0}
+
+        def _progress_preprocessed_handler(sender, **kwargs):
+            """Capture the total batch count once batching is complete."""
+            scenes = kwargs.get('scenes')
+            try:
+                _progress['total_batches'] = sum(
+                    len(getattr(scene, 'batches', None) or []) for scene in (scenes or [])
+                )
+            except Exception:
+                pass  # Progress falls back to "done-only" counting
+            if _progress['total_batches']:
+                print(f"[TRANSLATE] Batch progress: 0/{_progress['total_batches']}",
+                      file=sys.stderr, flush=True)
+
+        def _progress_batch_handler(sender, **kwargs):
+            """Emit done/total batch progress after each translated batch."""
+            _progress['done_batches'] += 1
+            done = _progress['done_batches']
+            total = _progress['total_batches']
+            if total > 0:
+                done = min(done, total)
+            else:
+                total = 0  # Unknown total — report done count only (e.g. "7/0")
+            print(f"[TRANSLATE] Batch progress: {done}/{total}",
+                  file=sys.stderr, flush=True)
+
+
         def _diagnostic_batch_handler(sender, **kwargs):
             """Track batch translation results for diagnostic summary.
 
@@ -778,11 +815,17 @@ def translate_subtitle(
         if hasattr(translator, 'events'):
             if hasattr(translator.events, 'batch_translated'):
                 translator.events.batch_translated.connect(_diagnostic_batch_handler)
+                if emit_raw_output:
+                    translator.events.batch_translated.connect(_progress_batch_handler)
             # Also hook warning/error signals for "No matches" detection
             if hasattr(translator.events, 'warning'):
                 translator.events.warning.connect(_diagnostic_warning_handler)
             if hasattr(translator.events, 'error'):
                 translator.events.error.connect(_diagnostic_error_handler)
+            # Total batch count arrives with the preprocessed event (scenes are
+            # fully batched before translation begins).
+            if emit_raw_output and hasattr(translator.events, 'preprocessed'):
+                translator.events.preprocessed.connect(_progress_preprocessed_handler)
 
         # =========================================================================
         # DIAGNOSTIC: Translation Start
