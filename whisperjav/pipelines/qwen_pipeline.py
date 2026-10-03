@@ -903,9 +903,30 @@ class QwenPipeline(BasePipeline):
                 **segmenter_kwargs,
             )
 
+            # Duration-weighted per-scene progress (owner report: the bar
+            # used to hit N/N the moment the LAST scene STARTED, then go
+            # silent for its whole detection — FireRedVAD detects a scene
+            # in one blocking model.detect() with no intra-scene callback,
+            # and the last scene is often the longest tail).
+            # v1.9.3 fix: (a) report AFTER each scene completes, so 100%
+            # means every scene actually finished; (b) weight the pct by
+            # cumulative scene duration — FireRedVAD cost scales with
+            # audio length, and an equal 1/N count let a long final scene
+            # hide behind ~1/N of the bar. Scene counts stay in the text.
+            # Direct update_bar (no update_scope): Phase 4 has no inner
+            # bars to fold, and the scope's pct is hard-wired to the
+            # integer count.
+            total_dur = float(sum(p[3] or 0.0 for p in _vad_scene_paths)) or 1.0
+            done_dur = 0.0
             for idx, (scene_path, start_sec, end_sec, dur_sec) in enumerate(_vad_scene_paths):
-                # Per-scene segmentation progress → main bar.
-                get_gate().update_scope(idx + 1, len(_vad_scene_paths), "Segmenting")
+                seg_pct = round(done_dur / total_dur * 100.0, 1)
+                get_gate().update_bar(
+                    f"Segmenting: scene {idx}/{len(_vad_scene_paths)} "
+                    f"[{seg_pct:.1f}% of audio]",
+                    scene=idx,
+                    scenes=len(_vad_scene_paths),
+                    pct=seg_pct,
+                )
                 try:
                     seg_result = segmenter.segment(scene_path, sample_rate=16000)
                     speech_regions_per_scene[idx] = seg_result
@@ -917,14 +938,23 @@ class QwenPipeline(BasePipeline):
                     )
                 except Exception as e:
                     logger.warning(f"Phase 4: Scene {idx + 1} segmentation failed: {e}, will transcribe full scene")
+                done_dur += float(dur_sec or 0.0)
+            # All scenes finished — only now does the bar read 100%.
+            get_gate().update_bar(
+                f"Segmenting: scene {len(_vad_scene_paths)}/{len(_vad_scene_paths)} [100.0% of audio]",
+                scene=len(_vad_scene_paths),
+                scenes=len(_vad_scene_paths),
+                pct=100.0,
+                final=True,
+            )
 
             segmenter.cleanup()
             del segmenter
 
-            # Finish the segmentation bar and drop the scope before the
-            # orchestrator installs its own "Transcribing" scope.
-            # clear_scope() first — see the Phase 3 note (scope fold would
-            # swallow the final GUI record otherwise).
+            # Finish the segmentation bar before the orchestrator installs
+            # its own "Transcribing" scope. clear_scope() is a harmless
+            # no-op here (Phase 4 never installs a scope), kept for
+            # symmetry with the Phase 3 teardown below it.
             get_gate().clear_scope()
             get_gate().end_bar("Segmenting: complete", pct=100.0)
 
