@@ -14,6 +14,15 @@ from whisperjav.utils.logger import logger
 from whisperjav.utils.console_gate import get_gate
 
 
+def _files_overall(file_number: int, total_files: int,
+                   pass_number: int, passes: int) -> float:
+    """Overall pct for the files bar given the file position `file_number`
+    (1-based). Callers pass either the completed count or the in-progress
+    count depending on the moment."""
+    overall = ((pass_number - 1) * total_files + file_number) / (passes * total_files) * 100.0
+    return round(min(max(overall, 0.0), 100.0), 1)
+
+
 def _emit_files_progress(file_number: int, total_files: int,
                          pass_number: Optional[int] = None,
                          passes: Optional[int] = None):
@@ -23,22 +32,40 @@ def _emit_files_progress(file_number: int, total_files: int,
     (two-pass) runs the record carries the pass number, and pct is the
     OVERALL position across all passes, so the GUI files bar advances
     monotonically from the first file of pass 1 to the last of pass 2.
+    Emitted when file `file_number` STARTS: the bar shows the number of
+    files already COMPLETED (x-1), not the file currently in flight.
     """
     total_files = max(total_files, 1)
     passes = max(passes or 1, 1)
     pass_number = min(max(pass_number or 1, 1), passes)
-    overall = ((pass_number - 1) * total_files + file_number) / (passes * total_files) * 100.0
-    if passes > 1:
-        label = f"Pass {pass_number}/{passes} · File {file_number}/{total_files}"
-    else:
-        label = f"File {file_number}/{total_files}"
     get_gate().emit_pipe(
         "files",
-        label,
+        f"Pass {pass_number}/{passes} · File {file_number}/{total_files}"
+        if passes > 1 else
+        f"File {file_number}/{total_files}",
         file=file_number,
         files=total_files,
         **{"pass": pass_number, "passes": passes},
-        pct=round(overall, 1),
+        pct=_files_overall(max(file_number - 1, 0), total_files, pass_number, passes),
+    )
+
+
+def _emit_files_done(file_number: int, total_files: int,
+                     pass_number: Optional[int] = None,
+                     passes: Optional[int] = None):
+    """GUI-only record: a file FINISHED — advance the files bar by one."""
+    total_files = max(total_files, 1)
+    passes = max(passes or 1, 1)
+    pass_number = min(max(pass_number or 1, 1), passes)
+    get_gate().emit_pipe(
+        "files",
+        f"Pass {pass_number}/{passes} · File {file_number}/{total_files}"
+        if passes > 1 else
+        f"File {file_number}/{total_files}",
+        file=file_number,
+        files=total_files,
+        **{"pass": pass_number, "passes": passes},
+        pct=_files_overall(file_number, total_files, pass_number, passes),
     )
 
 
@@ -84,6 +111,7 @@ class ProgressDisplayAdapter:
         self.current_file_context = self.unified_manager.start_file_processing(
             filename, file_number, self.total_files
         )
+        self._current_file_number = file_number
         _emit_files_progress(file_number, self.total_files)
 
     def set_current_step(self, step_name: str, step_number: Optional[int] = None, total_steps: int = 5):
@@ -135,7 +163,10 @@ class ProgressDisplayAdapter:
                 'output_path': output_path
             }
             self.unified_manager.complete_file(self.current_file_context, success=True, details=details)
-            
+
+        # GUI files bar: this file is now genuinely done — advance by one.
+        _emit_files_done(getattr(self, '_current_file_number', 1), self.total_files)
+
         # Always log completion for user awareness
         short_name = Path(filename).name
         logger.info(f"✓ {short_name} -> {subtitle_count} subtitle{'s' if subtitle_count != 1 else ''}")
@@ -159,6 +190,7 @@ class DummyProgressAdapter:
         # files-channel GUI record pass-aware ("Pass 1/2 · File i/N").
         self.pass_number = pass_number
         self.passes = passes
+        self._current_file_number = 1
     
     def close(self):
         pass
@@ -168,6 +200,7 @@ class DummyProgressAdapter:
     
     def set_current_file(self, filename: str, file_number: int):
         logger.info(f"\nProcessing file {file_number}: {Path(filename).name}")
+        self._current_file_number = file_number
         _emit_files_progress(file_number, self.total_files or 1,
                              pass_number=self.pass_number, passes=self.passes)
 
@@ -194,6 +227,9 @@ class DummyProgressAdapter:
     def show_file_complete(self, filename: str, subtitle_count: int, output_path: str):
         logger.info(f"✓ Completed: {Path(filename).name} -> {subtitle_count} subtitles")
         logger.info(f"Output saved to: {output_path}")
+        # GUI files bar: this file is now genuinely done — advance by one.
+        _emit_files_done(getattr(self, '_current_file_number', 1), self.total_files or 1,
+                         pass_number=self.pass_number, passes=self.passes)
     
     @contextmanager
     def pause_for_input(self):
