@@ -983,11 +983,13 @@ class DecoupledSubtitlePipeline:
                 segment_count = len(result.segments) if result and result.segments else 0
                 total_segments += segment_count
 
-                # Per-scene progress via the file-level scope: one bar for the
-                # whole reconstruct phase (the old per-scene logger.info line
-                # is demoted to debug — it tore the CLI bar and flooded the
-                # GUI panel).
-                get_gate().update_scope(scene_idx + 1, n_scenes, "Finalizing")
+                # Per-scene progress is deliberately NOT emitted here: the
+                # reconstruct/harden loop is fast bookkeeping and the old
+                # update_scope(..., "Finalizing") bar advanced the main GUI
+                # bar with progress that did not reflect real work (owner
+                # report 2026-07: "fake finalize bar"). Only phases with
+                # meaningful progress (Transcribing / ASR Text Gen) drive
+                # the main bar now.
                 logger.debug(
                     "[DecoupledPipeline] Scene %d/%d: %d words → %d segments (sentinel: %s)",
                     scene_idx + 1, n_scenes, word_count, segment_count, sentinel_status,
