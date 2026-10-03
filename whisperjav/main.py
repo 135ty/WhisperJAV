@@ -3496,14 +3496,28 @@ def main():
             # translating inferior fallback output wastes time and API cost.
             # ============================================================
             if args.translate and successful_count > 0:
+                # GUI progress: translation file-level labels on the
+                # "translate" channel (no-op in terminal runs).
+                from whisperjav.utils.console_gate import get_gate
+
                 print("\n" + "="*50)
                 print("STARTING TRANSLATION")
                 print("="*50)
+                # GUI progress: keep the files bar's label honest — ASR is
+                # done (100%), the run is now in the translation phase.
+                get_gate().emit_pipe("files", "ASR complete · translating…", final=True, pct=100.0)
 
                 translation_success = 0
                 translation_failed = 0
                 translation_skipped = 0
                 extra_context = build_translation_context(args)
+
+                _translatable = [
+                    r for r in results
+                    if not r.get('error') and r.get('status', 'unknown') not in ('failed', 'degraded')
+                    and r.get('summary', {}).get('final_output')
+                ]
+                _translate_index = 0
 
                 for result in results:
                     status = result.get('status', 'unknown')
@@ -3545,6 +3559,12 @@ def main():
                     try:
                         logger.info(f"Translating: {basename}")
                         print(f"Translating: {basename}")
+                        _translate_index += 1
+                        get_gate().emit_pipe(
+                            "translate",
+                            f"File {_translate_index}/{len(_translatable)}: {basename}",
+                            final=True,
+                        )
 
                         translated_path = translate_with_config(
                             input_path=output_path,
@@ -3592,6 +3612,13 @@ def main():
                 print(f"Skipped (too few subtitles): {translation_skipped}")
                 print(f"Failed: {translation_failed}")
                 print("="*50)
+                # GUI progress: settle the translate sub-bar at 100%.
+                get_gate().emit_pipe(
+                    "translate",
+                    f"Translation finished: {translation_success} translated, "
+                    f"{translation_skipped} skipped, {translation_failed} failed",
+                    final=True, pct=100.0,
+                )
 
                 # Unload Ollama model from VRAM after all files are translated
                 if args.translate_provider == 'ollama':

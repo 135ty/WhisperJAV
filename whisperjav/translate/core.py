@@ -690,6 +690,27 @@ def translate_subtitle(
         # which webview_gui/api.py parses to drive a determinate progress bar.
         _progress = {'total_batches': 0, 'done_batches': 0}
 
+        def _emit_translate_progress(done: int, total: int):
+            """GUI-only record on the "translate" channel (no-op in terminal).
+
+            Drives the GUI's translation sub-bar during ensemble runs. The
+            stderr "[TRANSLATE] Batch progress" lines stay for the standalone
+            translate-tab flow, which parses them from raw output.
+            """
+            pct = round(done / total * 100.0, 1) if total > 0 else 0.0
+            try:
+                from whisperjav.utils.console_gate import get_gate
+                get_gate().emit_pipe(
+                    "translate",
+                    f"Translating batches {done}/{total}" if total > 0
+                    else f"Translating batches: {done} done",
+                    done=done,
+                    total=total,
+                    pct=pct,
+                )
+            except Exception:
+                pass
+
         def _progress_preprocessed_handler(sender, **kwargs):
             """Capture the total batch count once batching is complete."""
             scenes = kwargs.get('scenes')
@@ -702,6 +723,7 @@ def translate_subtitle(
             if _progress['total_batches']:
                 print(f"[TRANSLATE] Batch progress: 0/{_progress['total_batches']}",
                       file=sys.stderr, flush=True)
+                _emit_translate_progress(0, _progress['total_batches'])
 
         def _progress_batch_handler(sender, **kwargs):
             """Emit done/total batch progress after each translated batch."""
@@ -714,6 +736,7 @@ def translate_subtitle(
                 total = 0  # Unknown total — report done count only (e.g. "7/0")
             print(f"[TRANSLATE] Batch progress: {done}/{total}",
                   file=sys.stderr, flush=True)
+            _emit_translate_progress(done, total)
 
 
         def _diagnostic_batch_handler(sender, **kwargs):

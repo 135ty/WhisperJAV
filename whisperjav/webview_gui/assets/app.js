@@ -926,7 +926,8 @@ const ProgressManager = {
     _auxBars: {
         files: { row: 'filesProgressRow', fill: 'filesProgressFill', value: 'filesStatusLabel' },
         stage: { row: 'stageProgressRow', fill: 'stageProgressFill', value: 'stageStatusLabel' },
-        asr:   { row: 'asrProgressRow',   fill: 'asrProgressFill',   value: 'asrStatusLabel' }
+        asr:   { row: 'asrProgressRow',   fill: 'asrProgressFill',   value: 'asrStatusLabel' },
+        translate: { row: 'translateProgressRow', fill: 'translateProgressFill', value: 'translateStatusLabel' }
     },
 
     setAux(channel, p) {

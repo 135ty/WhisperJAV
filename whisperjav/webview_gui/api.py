@@ -4433,6 +4433,11 @@ class WhisperJAVAPI:
         try:
             if self._translate_process and self._translate_process.stdout:
                 for line in self._translate_process.stdout:
+                    # Skip structured GUI progress records (translate-channel
+                    # emit_pipe output) — this flow parses the raw stderr-style
+                    # lines below, and PROGRESS JSON is console noise here.
+                    if line.startswith('PROGRESS\t'):
+                        continue
                     self._translate_log_queue.put(line)
                     # Parse progress: "Translating [1/3]: file_a.srt"
                     m = re.search(r'Translating \[(\d+)/(\d+)\]:\s+(.+)', line)
