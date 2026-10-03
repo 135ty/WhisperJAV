@@ -152,7 +152,7 @@ class VadGroupedFramer:
                 self._min_duration,
             )
 
-        logger.info(
+        logger.debug(
             "[VadGroupedFramer] %s: %d segments → %d groups → %d frames (%.1fs audio, %.1f%% speech)",
             seg_result.method,
             seg_result.num_segments,
