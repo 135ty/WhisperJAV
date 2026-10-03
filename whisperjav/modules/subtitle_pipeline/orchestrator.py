@@ -1070,7 +1070,7 @@ class DecoupledSubtitlePipeline:
                 results.append((None, asdict(error_diag)))
 
         get_gate().clear_scope()
-        get_gate().end_bar()
+        get_gate().end_bar("Transcribing: complete", pct=100.0)
         logger.info(
             "[DecoupledPipeline] Step 9: Complete — %d scenes, %d total segments, %d collapses",
             n_scenes, total_segments, total_collapses,

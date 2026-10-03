@@ -719,8 +719,11 @@ class QwenPipeline(BasePipeline):
         scene_detector = SceneDetectorFactory.safe_create_from_legacy_kwargs(**scene_detector_kwargs)
         result = scene_detector.detect_scenes(extracted_audio, scenes_dir, media_basename)
         scene_paths = result.to_legacy_tuples()
-        # Finish the detection bar (terminal newline; no-op record in pipe).
-        get_gate().end_bar()
+        # Finish the detection bar (terminal newline; GUI: final main-bar
+        # record at 100% so the bar closes instead of freezing at the last
+        # rate-limited frame — pipe-mode end_bar() with no args is seen by
+        # the terminal but not by the GUI).
+        get_gate().end_bar("Detecting scenes: complete", pct=100.0)
 
         # Tell the user which scenes look acoustically difficult. vad_threshold is
         # None because this pipeline segments with WhisperSeg by default, not with
@@ -853,10 +856,13 @@ class QwenPipeline(BasePipeline):
         if _vad_scene_paths is None:
             _vad_scene_paths = scene_paths
 
-        # Finish the enhancement bar (terminal newline; pipe no-op) and drop
-        # the scope so Phase 4 can start its own.
-        get_gate().end_bar()
+        # Finish the enhancement bar and drop the scope so Phase 4 can
+        # start its own. ORDER MATTERS in pipe mode: clear_scope() FIRST —
+        # while the scope is active, update_bar folds channel-less records
+        # into the scope and emits nothing for the GUI, which would swallow
+        # the final record and leave the main bar frozen.
         get_gate().clear_scope()
+        get_gate().end_bar("Enhancing: complete", pct=100.0)
 
         master_metadata["stages"]["enhancement"] = {
             "backend": self.enhancer_backend,
@@ -917,8 +923,10 @@ class QwenPipeline(BasePipeline):
 
             # Finish the segmentation bar and drop the scope before the
             # orchestrator installs its own "Transcribing" scope.
-            get_gate().end_bar()
+            # clear_scope() first — see the Phase 3 note (scope fold would
+            # swallow the final GUI record otherwise).
             get_gate().clear_scope()
+            get_gate().end_bar("Segmenting: complete", pct=100.0)
 
             master_metadata["stages"]["segmentation"] = {
                 "backend": self.segmenter_backend,
