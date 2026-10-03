@@ -445,10 +445,15 @@ class ConsoleGate:
             if final_text:
                 self.write_line(final_text)
         else:
-            if fields or final_text:
-                fields.setdefault("final", True)
-                self._last_pipe_emit = 0.0  # force emit
-                self.update_bar(final_text, **fields)
+            # Pipe mode: ALWAYS emit a final record. A bare end_bar() used to
+            # emit nothing here, which left the GUI bar frozen mid-flight
+            # (e.g. the semantic scene-detection bar stuck at its last
+            # rate-limited frame). Default pct is 100 — ending a bar means
+            # the tracked work reached completion.
+            fields.setdefault("final", True)
+            fields.setdefault("pct", 100.0)
+            self._last_pipe_emit = 0.0  # force emit
+            self.update_bar(final_text, **fields)
 
     # ------------------------------------------------------------------
     # Logger integration hook
@@ -511,7 +516,13 @@ class GateProgressBar:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        get_gate().end_bar()
+        # Pipe mode: route the final record to this bar's GUI channel (if
+        # any) at its final percentage, so channelled sub-bars (e.g. "asr")
+        # end cleanly instead of freezing at the last rate-limited frame.
+        fields = {"pct": self._pct()}
+        if self.channel:
+            fields["channel"] = self.channel
+        get_gate().end_bar(**fields)
         return False
 
     def set_description(self, desc=None):
