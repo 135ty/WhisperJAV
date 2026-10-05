@@ -1166,7 +1166,8 @@
             <section class="section run-section">
                 <div class="section-content">
                     <!-- Progress Bars: total files (top) → pipeline stage → transcribing (main) → ASR text gen.
-                         The three auxiliary rows are hidden while idle and shown only during a run. -->
+                         The auxiliary rows are hidden while idle and shown only during a run; a transient
+                         one (ASR text gen) is hidden again when the CLI retracts it at the end of its phase. -->
                     <div class="progress-container aux-progress" id="filesProgressRow" hidden>
                         <span class="status-label aux-label">Files</span>
                         <div class="progress-bar">

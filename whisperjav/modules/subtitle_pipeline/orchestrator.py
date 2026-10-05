@@ -610,6 +610,13 @@ class DecoupledSubtitlePipeline:
                 self.generator.unload()
                 self._safe_cuda_cleanup()
             get_gate().clear_scope()
+            # The GUI's "ASR Text Gen" sub-bar tracks THIS file's text
+            # generation — it is retracted (hidden) the moment that phase
+            # ends. Without this the row stays on screen, frozen at its last
+            # frame, for the rest of the file and often through the whole of
+            # the next one (owner report 2026-10: multi-file runs only).
+            # No-op in terminal runs; harmless when nothing was generated.
+            get_gate().retract_pipe("asr")
 
         # Phase 2: Cleaning
         logger.info("[DecoupledPipeline] Cleaning %d scenes", n_scenes)

@@ -138,3 +138,79 @@ def test_scope_fold_does_not_swallow_final_after_clear_scope():
     finally:
         gate._direct_stream = None
 
+
+# ---------------------------------------------------------------------------
+# retract_pipe: hide a transient GUI sub-bar (owner report 2026-10)
+# ---------------------------------------------------------------------------
+
+def test_retract_pipe_emits_a_hide_record_for_the_named_channel():
+    """A finished phase must be able to retract its sub-bar.
+
+    Multi-file runs: file N's "ASR Text Gen" bar stayed on screen, frozen,
+    while file N+1 was processed. The CLI now sends
+    {"channel": "asr", "retract": true} when the phase ends; app.js hides
+    that row on receipt (see tests/test_gui_aux_bar_retract.py).
+    """
+    gate = _make_gate()
+    buf = _FakePipe()
+    gate._direct_stream = buf
+    try:
+        gate.retract_pipe("asr")
+        (rec,) = _records(gate, 1)
+        assert rec["channel"] == "asr"
+        assert rec["retract"] is True
+    finally:
+        gate._direct_stream = None
+
+
+def test_retract_pipe_is_not_rate_limited():
+    """It must go out even right after a sub-bar frame (inside the window)."""
+    import time as _time
+
+    gate = _make_gate()
+    buf = _FakePipe()
+    gate._direct_stream = buf
+    try:
+        gate.emit_pipe("asr", "ASR Text Gen", pct=100.0)  # sets the channel clock
+        _time.sleep(0.01)                                 # well inside 0.5s
+        gate.retract_pipe("asr")
+        recs = _records(gate, 2)
+        assert recs[-1]["retract"] is True
+    finally:
+        gate._direct_stream = None
+
+
+def test_retract_pipe_is_a_no_op_in_terminal_mode():
+    """Terminal runs never see a sub-bar, so they must get no record at all."""
+
+    class _FakeTty(_FakePipe):
+        def isatty(self):
+            return True
+
+    gate = _make_gate()
+    buf = _FakeTty()
+    gate._direct_stream = buf
+    try:
+        gate.retract_pipe("asr")
+        assert buf.getvalue() == ""
+    finally:
+        gate._direct_stream = None
+
+
+def test_end_bar_on_other_channels_does_not_retract():
+    """files/translate settle per file with final=True and must stay visible.
+
+    Only an explicit retract_pipe() hides a row — final=True alone must not,
+    or the files bar would vanish as soon as translation began.
+    """
+    gate = _make_gate()
+    buf = _FakePipe()
+    gate._direct_stream = buf
+    try:
+        gate.end_bar(pct=100.0, channel="translate")
+        (rec,) = _records(gate, 1)
+        assert rec["final"] is True
+        assert "retract" not in rec
+    finally:
+        gate._direct_stream = None
+

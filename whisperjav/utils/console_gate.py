@@ -18,6 +18,10 @@ automatically:
 
   The GUI frontend (``app.js``) recognizes the ``PROGRESS\\t`` prefix and
   feeds the JSON to its own progress bar instead of the console panel.
+  A record may carry ``"channel"`` to address one of the GUI's auxiliary
+  sub-bars ("files" / "stage" / "asr" / "translate") instead of the main
+  bar, and ``"retract": true`` to tell the GUI to HIDE that sub-bar
+  because its phase ended (see :meth:`ConsoleGate.retract_pipe`).
 
 - **verbose bypass**: when configured with ``verbose=True`` the gate
   steps aside — ``update_bar`` falls back to the legacy raw ``\\r`` print
@@ -388,6 +392,23 @@ class ConsoleGate:
                 out.flush()
             except Exception:
                 return
+
+    def retract_pipe(self, channel: str):
+        """Tell the GUI to HIDE one auxiliary sub-bar (GUI-only).
+
+        Auxiliary sub-bars are transient: each tracks one phase of the file
+        being processed (the "asr" bar covers that file's text generation).
+        ``end_bar`` only settles such a bar at its last percentage, so
+        without this call the row stays on screen, frozen, while the run
+        moves on — visible in multi-file runs, where a finished file's bar
+        sits there through the whole of the next file.
+
+        No-op outside pipe mode, so terminal runs are untouched, and not
+        rate-limited: it is a single event and it must not be dropped when
+        it follows a sub-bar frame by less than the emit interval.
+        """
+        # final=True also bypasses emit_pipe's per-channel rate limiter.
+        self.emit_pipe(channel, "", retract=True, final=True)
 
     def write_line(self, text: str):
         """Print a full line, allowed to break the bar (errors, [DONE])."""

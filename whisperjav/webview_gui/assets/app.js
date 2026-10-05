@@ -889,11 +889,14 @@ const ConsoleManager = {
                 // (everything before the ASCII bar), e.g.
                 // "ASR Text Gen | Scene 4/11 (2s audio)" — the bar fill
                 // itself carries the n/total progress.
-                if (p.detail) {
-                    let d = String(p.detail);
-                    const cut = d.search(/\s*\[[=\-]{3,}\]/);
-                    if (cut !== -1) d = d.slice(0, cut);
-                    ProgressManager.setAux('asr', { ...p, detail: d.replace(/[:\s]+$/, '') });
+                // A retract record carries no detail (the phase is over) —
+                // forward it anyway, so the row is hidden instead of frozen.
+                let d = p.detail ? String(p.detail) : '';
+                const cut = d.search(/\s*\[[=\-]{3,}\]/);
+                if (cut !== -1) d = d.slice(0, cut);
+                d = d.replace(/[:\s]+$/, '');
+                if (d || p.retract === true) {
+                    ProgressManager.setAux('asr', { ...p, detail: d });
                 }
             } else {
                 ProgressManager.setAux(channel, p);
@@ -940,9 +943,13 @@ const ProgressManager = {
     },
 
     // Auxiliary bars (files / stage / ASR text gen). Each is hidden while
-    // idle, shown when its first channelled PROGRESS record arrives, and
-    // hidden again when the run ends (reset/hideAuxBars). The ASR bar's
-    // text is trimmed to the part before the ASCII bar (see routing above).
+    // idle and shown when its first channelled PROGRESS record arrives.
+    // They are transient: a record carrying "retract": true hides that one
+    // row again, because the phase it tracked is over (the CLI sends it when
+    // a file's ASR text generation finishes — without it the finished bar
+    // would sit frozen on screen all through the next file). hideAuxBars()
+    // clears every row when the run ends. The ASR bar's text is trimmed to
+    // the part before the ASCII bar (see routing above).
     _auxBars: {
         files: { row: 'filesProgressRow', fill: 'filesProgressFill', value: 'filesStatusLabel' },
         stage: { row: 'stageProgressRow', fill: 'stageProgressFill', value: 'stageStatusLabel' },
@@ -953,6 +960,12 @@ const ProgressManager = {
     setAux(channel, p) {
         const def = this._auxBars[channel];
         if (!def) return;
+        // Retract request: the phase this bar tracked has ended — hide it
+        // instead of leaving it on screen at its last percentage.
+        if (p && p.retract === true) {
+            this.hideAux(channel);
+            return;
+        }
         const row = document.getElementById(def.row);
         const fill = document.getElementById(def.fill);
         const value = document.getElementById(def.value);
@@ -966,14 +979,20 @@ const ProgressManager = {
         }
     },
 
+    hideAux(channel) {
+        const def = this._auxBars[channel];
+        if (!def) return;
+        const row = document.getElementById(def.row);
+        const fill = document.getElementById(def.fill);
+        const value = document.getElementById(def.value);
+        if (row) row.hidden = true;
+        if (fill) fill.style.width = '0%';
+        if (value) value.textContent = '—';
+    },
+
     hideAuxBars() {
-        for (const def of Object.values(this._auxBars)) {
-            const row = document.getElementById(def.row);
-            const fill = document.getElementById(def.fill);
-            const value = document.getElementById(def.value);
-            if (row) row.hidden = true;
-            if (fill) fill.style.width = '0%';
-            if (value) value.textContent = '—';
+        for (const channel of Object.keys(this._auxBars)) {
+            this.hideAux(channel);
         }
     },
 
