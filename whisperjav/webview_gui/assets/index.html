@@ -874,6 +874,13 @@
                                             <input type="checkbox" id="ensemble-serial">
                                             <span>Finish each file</span>
                                         </label>
+                                        <!-- Offline mode mirror (Ensemble tab): same setting as the
+                                             Transcription tab's #offlineMode checkbox (Advanced
+                                             options); app.js keeps the two in sync. -->
+                                        <label class="checkbox-label" style="margin-left: 16px; white-space: nowrap;" title="Use only the Hugging Face models already downloaded and make no requests to huggingface.co (same as --offline). A model that has not been downloaded fails immediately instead of retrying for minutes. Silero via torch.hub, openai-whisper weights, ModelScope enhancers and NeMo configs are not covered. Same setting as 'Offline mode' on the Transcription Adv. Options tab.">
+                                            <input type="checkbox" id="ensembleOfflineMode">
+                                            <span>Offline</span>
+                                        </label>
                                     </div>
                                 </div>
 

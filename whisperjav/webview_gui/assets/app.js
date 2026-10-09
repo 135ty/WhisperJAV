@@ -1840,6 +1840,24 @@ const EnsembleManager = {
             srcLang.addEventListener('change', () => { ensLang.value = srcLang.value; });
         }
 
+        // Offline mode mirror (Ensemble tab): same setting as the Transcription
+        // tab's #offlineMode checkbox (Advanced options). The Ensemble tab's copy
+        // forwards a real 'change' event onto #offlineMode so SettingsPersistence
+        // (which listens there) also saves toggles made from this tab; the reverse
+        // direction is a silent copy, so restoring saved settings via
+        // SettingsPersistence.applyToForm — which dispatches 'change' on
+        // #offlineMode — propagates here without looping.
+        const ensOffline = document.getElementById('ensembleOfflineMode');
+        const advOffline = document.getElementById('offlineMode');
+        if (ensOffline && advOffline) {
+            ensOffline.checked = advOffline.checked;  // initial sync
+            ensOffline.addEventListener('change', () => {
+                advOffline.checked = ensOffline.checked;
+                advOffline.dispatchEvent(new Event('change'));
+            });
+            advOffline.addEventListener('change', () => { ensOffline.checked = advOffline.checked; });
+        }
+
         // Customize buttons
         document.getElementById('customize-pass1').addEventListener('click', () => this.openCustomize('pass1'));
         document.getElementById('customize-pass2').addEventListener('click', () => this.openCustomize('pass2'));
