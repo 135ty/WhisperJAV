@@ -261,14 +261,18 @@ def patch_hf_hub_downloads():
     )
     huggingface_hub.hf_hub_download = _patched_hf_hub
 
-    # Also patch faster_whisper.utils which imports huggingface_hub at module level
-    try:
-        import faster_whisper.utils as fw_utils
-        if hasattr(fw_utils, "huggingface_hub"):
-            fw_utils.huggingface_hub.snapshot_download = _patched_snapshot
-            fw_utils.huggingface_hub.hf_hub_download = _patched_hf_hub
-    except ImportError:
-        pass
+    # Also patch faster_whisper.utils which references huggingface_hub at module
+    # level. NOTE: faster_whisper.utils only does attribute access
+    # (`huggingface_hub.snapshot_download(...)`) on the *shared* module object
+    # we already patched above, so re-patching its reference is a no-op.
+    # Crucially, do NOT import faster_whisper here if it is not loaded yet:
+    # importing it eagerly drags in torch + transformers (~3 s cold) before the
+    # GUI window even opens. Patch only when it is already in memory.
+    import sys as _sys
+    fw_utils = _sys.modules.get("faster_whisper.utils")
+    if fw_utils is not None and hasattr(fw_utils, "huggingface_hub"):
+        fw_utils.huggingface_hub.snapshot_download = _patched_snapshot
+        fw_utils.huggingface_hub.hf_hub_download = _patched_hf_hub
 
     _patched = True
     logger.debug("HuggingFace Hub download resilience patch applied")
